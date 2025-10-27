@@ -7,6 +7,8 @@
     <!-- Tailwind CSS CDN 로드 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <!-- Chart.js CDN 로드 (그래프 시각화용) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script> 
     <style>
         /* Inter 폰트 사용 및 배경색 설정 */
         body {
@@ -212,6 +214,38 @@
             </div>
         </div>
 
+        <!-- 검색량 분석 및 연관 키워드 섹션 (새로 추가됨) -->
+        <div id="searchVolumeAnalysis" class="hidden bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between">
+                <span id="analysisTitle">키워드 검색량 및 연관 분석 결과 (시뮬레이션 - 월간)</span>
+                <div class="flex items-center space-x-2">
+                    <label for="trendRange" class="text-sm font-medium text-gray-700">추이:</label>
+                    <select id="trendRange" class="p-1 border border-gray-300 rounded-lg text-sm bg-gray-50">
+                        <option value="weekly">주간</option>
+                        <option value="monthly" selected>월간</option>
+                        <option value="yearly">년간</option>
+                    </select>
+                </div>
+            </h2>
+
+            <!-- 연관 키워드 표시 -->
+            <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                <p class="text-sm font-semibold text-gray-700 mb-1 flex items-center">
+                    연관 검색 키워드 (Gemini 분석): 
+                    <span id="relatedKeywordsLoading" class="hidden ml-2 spinner-sm border-blue-600 border-l-transparent"></span>
+                </p>
+                <div id="relatedKeywordsList" class="flex flex-wrap gap-2 text-sm">
+                    <!-- 연관 키워드가 여기에 삽입됩니다 -->
+                </div>
+            </div>
+
+            <!-- 검색량 추이 그래프 -->
+            <div class="h-64">
+                <canvas id="searchVolumeChart"></canvas>
+            </div>
+        </div>
+
+
         <!-- 결과 리스트 섹션 -->
         <div id="searchResultsContainer" class="hidden">
             <h2 id="resultCountHeader" class="text-xl font-bold text-gray-800 mb-4">검색 결과 (0개)</h2>
@@ -287,6 +321,16 @@
         const minViewsInput = document.getElementById('minViews');
         const regionCodeSelect = document.getElementById('regionCode');
         const tagInclusionCheckbox = document.getElementById('tagInclusion');
+
+        // 새로운 요소 캐시 (검색량 분석 관련)
+        const searchVolumeAnalysis = document.getElementById('searchVolumeAnalysis');
+        const trendRangeSelect = document.getElementById('trendRange');
+        const relatedKeywordsList = document.getElementById('relatedKeywordsList');
+        const relatedKeywordsLoading = document.getElementById('relatedKeywordsLoading');
+        const analysisTitle = document.getElementById('analysisTitle');
+        
+        let searchVolumeChartInstance = null; // Chart.js 인스턴스를 저장할 변수
+        let currentKeyword = ''; // 현재 검색된 키워드를 저장할 변수
         
         // =================================================================
         // 국가 코드 매핑은 2자리 코드 사용을 위해 제거되었습니다.
@@ -468,7 +512,7 @@
         }
 
         // =================================================================
-        // Gemini API 로직 (번역 및 요약용)
+        // Gemini API 로직 (번역, 요약, 연관 키워드)
         // =================================================================
         const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=';
 
@@ -515,6 +559,100 @@
             }
         }
         
+        /**
+         * 임의의 단일 검색량 값을 생성합니다. (시뮬레이션)
+         */
+        function generateSimulatedVolume(keyword, range) {
+            // 키워드 길이에 따른 작은 변동성을 부여 (긴 키워드는 조금 낮은 기본값)
+            const lengthFactor = 1 - Math.min(keyword.length / 50, 0.5); 
+            let baseValue = (Math.floor(Math.random() * 5000) + 5000) * lengthFactor; 
+            
+            // 기간별 배율 조정
+            if (range === 'weekly') {
+                baseValue = baseValue / 4; 
+            } else if (range === 'yearly') {
+                baseValue = baseValue * 10;
+            }
+            
+            // 최종 난수 노이즈 추가
+            let volume = baseValue + (Math.random() - 0.5) * baseValue * 0.3;
+            
+            return Math.max(100, Math.round(volume));
+        }
+
+        /**
+         * Gemini API를 호출하여 연관 키워드를 생성하고 표시합니다.
+         * @param {string} keyword - 분석할 메인 키워드
+         */
+        async function fetchRelatedKeywords(keyword) {
+            relatedKeywordsList.innerHTML = '';
+            relatedKeywordsLoading.classList.remove('hidden');
+            const currentRange = trendRangeSelect.value;
+
+            // **수정된 부분: 20개의 연관 키워드 요청**
+            const systemPrompt = "You are an expert YouTube SEO analyst. Generate approximately 20 highly relevant and specific long-tail keywords based on the user's main keyword. Output the keywords as a single, comma-separated string, nothing else.";
+            const userPrompt = `Generate approximately 20 related Korean YouTube search keywords for: "${keyword}"`;
+
+            try {
+                const result = await callGeminiApi(userPrompt, systemPrompt);
+                
+                if (result.startsWith('[API 오류:')) {
+                    relatedKeywordsList.innerHTML = `<span class="text-red-500 text-sm">${result}</span>`;
+                } else {
+                    const keywords = result.split(',').map(k => k.trim()).filter(k => k.length > 0);
+                    
+                    if (keywords.length > 0) {
+                        const keywordHtml = keywords.map(kw => {
+                            const volume = generateSimulatedVolume(kw, currentRange);
+                            return `
+                                <button 
+                                    class="tag-search-btn text-xs bg-blue-100 text-blue-800 font-semibold px-2 py-1 rounded-full hover:bg-blue-200 transition active:scale-95 flex items-center" 
+                                    data-tag-value="${kw.replace(/"/g, '&quot;')}"
+                                    data-keyword-volume="${volume}"
+                                >
+                                    ${kw} <span class="ml-2 font-bold text-gray-700 bg-white px-1 rounded-sm">${formatNumber(volume)}회</span>
+                                </button>
+                            `;
+                        }).join('');
+                        relatedKeywordsList.innerHTML = keywordHtml;
+                    } else {
+                        relatedKeywordsList.innerHTML = `<span class="text-gray-500 text-sm">연관 키워드를 찾지 못했습니다.</span>`;
+                    }
+                }
+
+            } catch(e) {
+                 relatedKeywordsList.innerHTML = `<span class="text-red-500 text-sm">연관 키워드 분석 중 오류 발생.</span>`;
+            } finally {
+                relatedKeywordsLoading.classList.add('hidden');
+            }
+        }
+        
+        /**
+         * 검색량 추이 범위 변경 시 이미 표시된 연관 키워드의 볼륨을 업데이트합니다.
+         */
+        function updateRelatedKeywordVolumes(range) {
+            const buttons = relatedKeywordsList.querySelectorAll('.tag-search-btn');
+            
+            buttons.forEach(button => {
+                const keyword = button.dataset.tagValue;
+                const newVolume = generateSimulatedVolume(keyword, range);
+                
+                // 데이터 속성 업데이트
+                button.dataset.keywordVolume = newVolume;
+                
+                // UI 업데이트
+                const volumeSpan = button.querySelector('span');
+                if (volumeSpan) {
+                    volumeSpan.textContent = `${formatNumber(newVolume)}회`;
+                }
+            });
+
+            // 검색량 섹션의 제목 업데이트
+            const rangeText = trendRangeSelect.options[trendRangeSelect.selectedIndex].text;
+            analysisTitle.textContent = `키워드 검색량 및 연관 분석 결과 (시뮬레이션 - ${rangeText})`;
+        }
+
+
         // =================================================================
         // 클립보드 복사 로직
         // =================================================================
@@ -557,7 +695,108 @@
                 buttonElement.className = originalClasses;
             }, 2000);
         }
+        
+        // =================================================================
+        // 검색량 추이 그래프 (Chart.js)
+        // =================================================================
 
+        /**
+         * 임의의 검색량 데이터를 생성합니다. (실제 API 미지원으로 시뮬레이션)
+         */
+        function generateTrendData(range) {
+            let count;
+            let labels;
+            let data = [];
+            const baseValue = Math.floor(Math.random() * 5000) + 5000; // 5000~10000 사이
+
+            if (range === 'weekly') {
+                count = 7;
+                labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+            } else if (range === 'yearly') {
+                count = 12;
+                labels = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+            } else { // monthly (default)
+                count = 4;
+                labels = ['Week 1', 'Week 2', 'Week 3', 'Week 4'];
+            }
+
+            // Simulating a slightly rising/falling trend with noise
+            let currentValue = baseValue;
+            for (let i = 0; i < count; i++) {
+                // Apply a small random variation (up to +/- 20% of base value)
+                currentValue = currentValue + (Math.random() - 0.5) * baseValue * 0.2;
+                data.push(Math.max(0, Math.round(currentValue))); // Ensure positive
+            }
+
+            return { labels, data };
+        }
+
+        /**
+         * 검색량 추이 그래프를 렌더링합니다.
+         */
+        function renderSearchTrendGraph(keyword, range) {
+            const ctx = document.getElementById('searchVolumeChart').getContext('2d');
+            const { labels, data } = generateTrendData(range);
+
+            if (searchVolumeChartInstance) {
+                searchVolumeChartInstance.destroy();
+            }
+
+            searchVolumeChartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${keyword} 검색량 추이 (${range})`,
+                        data: data,
+                        borderColor: 'rgb(59, 130, 246)', // blue-500
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: 'rgb(37, 99, 235)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: '검색량 (시뮬레이션)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return formatNumber(value);
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += formatNumber(context.parsed.y);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
         // =================================================================
         // 검색 및 분석 로직 (3단계 요청)
         // =================================================================
@@ -577,8 +816,10 @@
             messageBox.textContent = '';
             resultsList.innerHTML = '';
             searchResultsContainer.classList.add('hidden');
+            searchVolumeAnalysis.classList.add('hidden');
 
             const keyword = searchKeywordInput.value.trim();
+            currentKeyword = keyword; // 현재 키워드 저장
             const sortBy = sortBySelect.value;
             const maxResults = maxResultsSelect.value;
             const videoDuration = videoDurationSelect.value;
@@ -593,6 +834,16 @@
             }
 
             try {
+                // --- Step A: 분석 섹션 업데이트 (비동기 처리) ---
+                searchVolumeAnalysis.classList.remove('hidden');
+                // 연관 키워드 비동기 요청 시작
+                const relatedKeywordsPromise = fetchRelatedKeywords(keyword);
+                // 그래프 초기 렌더링
+                renderSearchTrendGraph(keyword, trendRangeSelect.value);
+                // 연관 키워드 볼륨 타이틀 업데이트
+                updateRelatedKeywordVolumes(trendRangeSelect.value); 
+
+
                 // --- Step 1: Search API 호출 (영상 ID 목록 및 기본 메타데이터 가져오기) ---
                 let searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&type=video&maxResults=${maxResults}&order=${sortBy}&key=${youtubeApiKey}`;
                 
@@ -705,6 +956,10 @@
                 // --- Step 5: 결과 렌더링 ---
                 renderResults(filteredResults, keyword);
 
+                // 연관 키워드 요청이 끝날 때까지 기다림
+                await relatedKeywordsPromise;
+
+
             } catch (error) {
                 console.error("Search/Analysis Error:", error);
                 messageBox.textContent = "😭 데이터를 가져오는 중 예상치 못한 오류가 발생했습니다. 콘솔을 확인해 주세요.";
@@ -738,7 +993,7 @@
                 
                 const channelLink = `https://www.youtube.com/channel/${video.channelId}`; // 채널 링크
                 
-                // 국가 코드 -> 단축어 (2자리 코드) 사용으로 롤백 (수정된 부분)
+                // 국가 코드 -> 단축어 (2자리 코드) 사용
                 const countryCode = video.channelCountry;
                 const countryDisplay = countryCode !== 'N/A' ? `<span class="text-gray-500 font-medium ml-1">(${countryCode})</span>` : ''; // 국가 표시 (2자리 코드)
                 
@@ -760,7 +1015,7 @@
                         }
                     }
                     // 태그에 data-tag-value 속성을 추가하고 버튼으로 변경하여 클릭 가능하게 만듭니다.
-                    return `<button class="tag-search-btn bg-gray-200 text-gray-700 text-xs font-medium px-2 py-1 rounded-md inline-block mr-2 mb-1 hover:bg-blue-300 transition duration-150 active:scale-95" data-tag-value="${tag.replace(/"/g, '&quot;')}">${tag}</button>${rankBadge}`;
+                    return `<button class="tag-search-btn bg-gray-200 text-gray-700 text-xs font-medium px-2 py-1 rounded-md inline-block mr-2 mb-1 hover:bg-blue-300 transition duration-150 active:scale-95" data-tag-value="${tag.replace(/"/g, '&quot;')}" title="클릭하여 태그로 검색">${tag}</button>${rankBadge}`;
                 }).join('');
 
                 const copyButtonHtml = video.tags.length > 0 ? `
@@ -912,8 +1167,19 @@
                 runSearchAndAnalysis();
             }
         });
+        
+        // 2. 검색량 추이 범위 변경 버튼
+        trendRangeSelect.addEventListener('change', () => {
+            const newRange = trendRangeSelect.value;
+            if (currentKeyword) {
+                // 그래프 업데이트
+                renderSearchTrendGraph(currentKeyword, newRange);
+                // 연관 키워드 볼륨 업데이트
+                updateRelatedKeywordVolumes(newRange); 
+            }
+        });
 
-        // 2. 키 변경 버튼 (API 키 모달 열기)
+        // 3. 키 변경 버튼 (API 키 모달 열기)
         openModalButton.addEventListener('click', () => {
             if (youtubeApiKey) {
                 apiKeyInput.value = youtubeApiKey;
@@ -921,7 +1187,7 @@
             showApiKeyModal(true);
         });
 
-        // 3. 모달 저장 버튼
+        // 4. 모달 저장 버튼
         saveApiKeyButton.addEventListener('click', () => {
             const key = apiKeyInput.value.trim();
             if (key.length < 20) { 
@@ -932,7 +1198,7 @@
             saveApiKey(key);
         });
 
-        // 4. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
+        // 5. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
         resultsList.addEventListener('click', (event) => {
             // 태그 복사 버튼 처리
             const copyButton = event.target.closest('.copy-tags-btn');
@@ -961,7 +1227,21 @@
             }
         });
         
-        // 5. 초기화
+        // 6. 연관 키워드 버튼 처리 (이벤트 위임 사용)
+        searchVolumeAnalysis.addEventListener('click', (event) => {
+            const tagButton = event.target.closest('.tag-search-btn');
+            if (tagButton) {
+                const tagValue = tagButton.dataset.tagValue;
+                if (tagValue) {
+                    searchKeywordInput.value = tagValue; // 검색 키워드 필드에 태그 값 설정
+                    runSearchAndAnalysis(); // 검색 실행
+                }
+            }
+        });
+
+
+        
+        // 7. 초기화
         window.addEventListener('load', initializeFirebase);
     </script>
 </body>
