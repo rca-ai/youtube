@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube 영상 검색 대시보드</title>
+    <!-- Tailwind CSS CDN 로드 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <style>
+        /* Inter 폰트 사용 및 배경색 설정 */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f4f7f9;
+            min-height: 100vh;
+        }
+        /* 로딩 스피너 애니메이션 */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        /* 버튼 내 로딩 스피너 */
+        .spinner-sm {
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-left-color: #fff;
+            width: 1rem;
+            height: 1rem;
+            animation: spin 1s linear infinite;
+            border-radius: 50%;
+        }
+        /* 모달 오버레이 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        /* 영상 길이 오버레이 스타일 */
+        .duration-overlay {
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            font-size: 0.75rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <!-- API Key 입력 모달 (기존 로직 유지) -->
+    <div id="apiKeyModal" class="modal-overlay hidden">
+        <div class="bg-white p-6 sm:p-8 rounded-xl shadow-2xl w-full max-w-md mx-4 transform transition duration-300">
+            <h2 class="text-xl font-bold text-gray-800 mb-4">YouTube API 키 입력</h2>
+            <p class="text-gray-600 mb-4 text-sm">
+                영상을 검색하려면 YouTube Data API v3 키가 필요합니다. 이 키는 Firestore에 안전하게 저장됩니다.
+            </p>
+            <input
+                type="text"
+                id="apiKeyInput"
+                placeholder="여기에 API 키를 붙여넣으세요"
+                class="w-full p-3 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+            <div id="modalMessage" class="text-sm text-red-500 mb-4 font-medium hidden"></div>
+            <div class="flex justify-end gap-3">
+                <button
+                    id="saveApiKeyButton"
+                    class="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-150 active:scale-95"
+                >
+                    키 저장 및 사용
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto">
+        <!-- 헤더 및 타이틀 -->
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">
+                YouTube 영상 검색 대시보드
+            </h1>
+            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요.</p>
+        </header>
+
+        <!-- 검색 및 필터 섹션 -->
+        <div class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <div id="loadingIndicator" class="text-center hidden mb-4">
+                <div class="spinner mr-2"></div>
+                <span class="text-blue-500 font-semibold">검색 및 데이터 분석 중... (API 2단계 요청)</span>
+            </div>
+
+            <p id="messageBox" class="text-sm mt-3 text-red-500 font-medium"></p>
+            
+            <!-- 1. 키워드 및 실행 버튼 -->
+            <div class="flex flex-col sm:flex-row gap-4 mb-6">
+                <input
+                    type="text"
+                    id="searchKeyword"
+                    placeholder="검색할 키워드를 입력하세요 (예: 제미나이 코딩)"
+                    class="flex-grow p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-150"
+                    required
+                >
+                <button
+                    id="searchButton"
+                    class="bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-blue-700 transition duration-150 active:scale-95 disabled:bg-gray-400"
+                >
+                    검색 시작
+                </button>
+                <button
+                    id="openModalButton"
+                    class="bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-gray-500 transition duration-150 active:scale-95"
+                    title="API 키 다시 입력"
+                >
+                    🔑 키 변경
+                </button>
+            </div>
+
+            <!-- 2. 고급 필터 옵션 -->
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 text-sm">
+                
+                <!-- 정렬 방식 -->
+                <div>
+                    <label for="sortBy" class="block text-gray-700 font-medium mb-1">정렬 기준</label>
+                    <select id="sortBy" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="relevance">관련성 (기본)</option>
+                        <option value="viewCount">조회수</option>
+                        <option value="date">업로드 날짜</option>
+                    </select>
+                </div>
+
+                <!-- 결과 수량 -->
+                <div>
+                    <label for="maxResults" class="block text-gray-700 font-medium mb-1">결과 수</label>
+                    <select id="maxResults" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="30">30개</option>
+                        <option value="50" selected>50개</option>
+                        <option value="100">100개</option>
+                        <option value="200">200개 (주의: API 할당량 소모)</option>
+                    </select>
+                </div>
+
+                <!-- 영상 길이 -->
+                <div>
+                    <label for="videoDuration" class="block text-gray-700 font-medium mb-1">영상 길이</label>
+                    <select id="videoDuration" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="any">전체 (기본)</option>
+                        <option value="short">숏츠 (4분 미만)</option>
+                        <option value="medium">4분 ~ 20분</option>
+                        <option value="long">20분 이상</option>
+                    </select>
+                </div>
+
+                <!-- 기간 -->
+                <div>
+                    <label for="dateRange" class="block text-gray-700 font-medium mb-1">기간</label>
+                    <select id="dateRange" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="all">전체 (기본)</option>
+                        <option value="today">오늘</option>
+                        <option value="thisWeek">이번 주</option>
+                        <option value="thisMonth">이번 달</option>
+                        <option value="thisYear">이번 년</option>
+                    </select>
+                </div>
+
+                <!-- 최소 조회수 (클라이언트 필터) -->
+                <div>
+                    <label for="minViews" class="block text-gray-700 font-medium mb-1">최소 조회수</label>
+                    <input type="number" id="minViews" placeholder="0" value="0" min="0" class="w-full p-2 border border-gray-300 rounded-lg">
+                </div>
+                
+                <!-- 국가 (리전) -->
+                <div>
+                    <label for="regionCode" class="block text-gray-700 font-medium mb-1">국가</label>
+                    <select id="regionCode" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="">전체 (기본)</option>
+                        <option value="KR">대한민국</option>
+                        <option value="US">미국</option>
+                        <option value="JP">일본</option>
+                        <option value="GB">영국</option>
+                        <option value="DE">독일</option>
+                        <option value="CN">중국</option>
+                        <option value="VN">베트남</option>
+                        <option value="TH">태국</option>
+                    </select>
+                </div>
+
+                <!-- 태그 포함/불포함 옵션 -->
+                <div class="col-span-2 md:col-span-4 lg:col-span-6">
+                    <label class="inline-flex items-center mt-3">
+                        <input type="checkbox" id="tagInclusion" checked class="form-checkbox h-4 w-4 text-blue-600 rounded">
+                        <span class="ml-2 text-gray-700 font-medium">검색 키워드를 영상 태그에 포함하여 검색</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- 결과 리스트 섹션 -->
+        <div id="searchResultsContainer" class="hidden">
+            <h2 id="resultCountHeader" class="text-xl font-bold text-gray-800 mb-4">검색 결과 (0개)</h2>
+            <div id="resultsList" class="space-y-4">
+                <!-- 여기에 검색 결과 카드가 삽입됩니다. -->
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript 로직 (type="module"로 변경하여 Firebase Import 가능) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firestore 로깅 활성화 (디버깅 목적)
+        setLogLevel('debug');
+
+        // GitHub/외부 환경에서 Firebase를 초기화하기 위한 더미 설정 또는 사용자 입력 설정
+        const dummyFirebaseConfig = {
+            apiKey: "YOUR_FIREBASE_API_KEY", // 실제 키로 대체해야 합니다.
+            authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+            projectId: "YOUR_PROJECT_ID",
+            storageBucket: "YOUR_PROJECT_ID.appspot.com",
+            messagingSenderId: "YOUR_SENDER_ID",
+            appId: "YOUR_APP_ID"
+        };
+
+
+        // Global variables provided by the Canvas environment (with fallback for external hosting)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // __firebase_config가 정의되지 않았거나 파싱에 실패하면 dummyFirebaseConfig를 사용합니다.
+        const firebaseConfig = (() => {
+            try {
+                return typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : dummyFirebaseConfig;
+            } catch (e) {
+                console.warn("Failed to parse __firebase_config. Using dummy configuration.", e);
+                return dummyFirebaseConfig;
+            }
+        })();
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId = 'anonymous'; 
+        
+        // NOTE: The user has requested to hardcode this key for testing purposes to bypass immediate API key input errors.
+        const DEFAULT_YOUTUBE_API_KEY = 'AIzaSyDe0emcV4KC675d04fgKn1bmFPdXldpdxE';
+        let youtubeApiKey = DEFAULT_YOUTUBE_API_KEY; // Pre-fill with the user-provided key
+
+        // DOM 요소 캐시
+        const searchKeywordInput = document.getElementById('searchKeyword');
+        const searchButton = document.getElementById('searchButton');
+        const openModalButton = document.getElementById('openModalButton');
+        const messageBox = document.getElementById('messageBox');
+        const loadingIndicator = document.getElementById('loadingIndicator');
+
+        const apiKeyModal = document.getElementById('apiKeyModal');
+        const apiKeyInput = document.getElementById('apiKeyInput');
+        const saveApiKeyButton = document.getElementById('saveApiKeyButton');
+        const modalMessage = document.getElementById('modalMessage');
+
+        const resultsList = document.getElementById('resultsList');
+        const searchResultsContainer = document.getElementById('searchResultsContainer');
+        const resultCountHeader = document.getElementById('resultCountHeader');
+        
+        // 필터 요소 캐시
+        const sortBySelect = document.getElementById('sortBy');
+        const maxResultsSelect = document.getElementById('maxResults');
+        const videoDurationSelect = document.getElementById('videoDuration');
+        const dateRangeSelect = document.getElementById('dateRange');
+        const minViewsInput = document.getElementById('minViews');
+        const regionCodeSelect = document.getElementById('regionCode');
+        const tagInclusionCheckbox = document.getElementById('tagInclusion');
+        
+        // =================================================================
+        // 국가 코드 매핑은 2자리 코드 사용을 위해 제거되었습니다.
+        // =================================================================
+
+
+        // =================================================================
+        // Firebase 및 API Key 관리 로직 (기존 유지)
+        // =================================================================
+        
+        async function initializeFirebase() {
+            // 외부 호스팅 시, dummyFirebaseConfig에 실제 값이 입력되지 않으면 Firestore 기능 사용 불가 경고
+            if (firebaseConfig === dummyFirebaseConfig && firebaseConfig.apiKey === "YOUR_FIREBASE_API_KEY") {
+                console.warn("🚨 Firebase 설정이 기본값입니다. 키 저장 기능은 Canvas 외부에서 작동하지 않을 수 있습니다.");
+                messageBox.textContent = "Firebase 설정이 기본값입니다. API 키 저장을 위해서는 Firebase 설정을 직접 입력해야 합니다.";
+                
+                // Canvas 외부에서는 인증이 성공하지 못하므로 익명으로 강제 설정
+                userId = crypto.randomUUID(); // 고유 ID로 설정하여 키 저장소 경로만 생성
+            }
+            
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // initialAuthToken이 있을 때만 Custom Token 인증 시도 (Canvas 환경)
+                // 없을 경우 익명 인증 시도 (외부 환경, 혹은 인증 토큰 없는 경우)
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                if (auth.currentUser) {
+                    userId = auth.currentUser.uid;
+                    console.log("Firebase initialized and user signed in. UID:", userId);
+                    await loadApiKey();
+                } else {
+                    // 익명 인증도 실패하면 userId를 임시 고유 ID로 유지
+                    console.warn("Firebase initialized, but no user is signed in. Using temporary UUID for storage context.");
+                }
+            } catch (error) {
+                console.error("Firebase Initialization Error:", error);
+                // Firebase 초기화 실패 시 메시지 박스에 출력
+                messageBox.textContent = "Firebase 초기화 중 오류가 발생했습니다. 키 저장이 불가능합니다.";
+            }
+        }
+        
+        async function loadApiKey() {
+            if (!db || !userId) return;
+            const keyDocRef = doc(db, `artifacts/${appId}/users/${userId}/settings/youtube_api_key`);
+            try {
+                const docSnap = await getDoc(keyDocRef);
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    youtubeApiKey = data.key; // Load from Firestore if exists
+                    console.log("API Key loaded successfully from Firestore.");
+                } else {
+                    console.log("No stored API Key found. Using default hardcoded key.");
+                    // youtubeApiKey는 이미 DEFAULT_YOUTUBE_API_KEY로 설정되어 있으므로 별도 설정 불필요
+                    showApiKeyModal(true); // 키 입력 창은 띄워서 확인하도록 유도
+                }
+            } catch (e) {
+                console.error("Error loading API key:", e);
+                // 오류 발생 시 모달을 띄워 사용자에게 키 입력 유도
+                showApiKeyModal(true); 
+            }
+        }
+
+        async function saveApiKey(key) {
+            if (!db || !userId || !key) {
+                modalMessage.textContent = "저장 오류: 데이터베이스 또는 사용자 ID가 유효하지 않습니다.";
+                modalMessage.classList.remove('hidden');
+                return;
+            }
+
+            const keyDocRef = doc(db, `artifacts/${appId}/users/${userId}/settings/youtube_api_key`);
+            
+            try {
+                await setDoc(keyDocRef, { key: key, savedAt: new Date().toISOString() });
+                youtubeApiKey = key;
+                apiKeyModal.classList.add('hidden');
+                modalMessage.classList.add('hidden');
+                messageBox.textContent = "✅ API 키가 성공적으로 저장되었습니다.";
+                console.log("API Key saved successfully to Firestore.");
+            } catch (e) {
+                console.error("Error saving API key:", e);
+                modalMessage.textContent = `키 저장 중 오류 발생: ${e.message}. Firebase 설정이 올바른지 확인해 주세요.`;
+                modalMessage.classList.remove('hidden');
+            }
+        }
+        
+        function showApiKeyModal(show) {
+            if (show) {
+                // 현재 youtubeApiKey 값을 입력 필드에 자동 채움 (기본값 또는 Firestore에서 로드된 값)
+                if (youtubeApiKey !== '') {
+                    apiKeyInput.value = youtubeApiKey;
+                }
+                apiKeyModal.classList.remove('hidden');
+                apiKeyInput.focus();
+            } else {
+                apiKeyModal.classList.add('hidden');
+            }
+        }
+
+        // =================================================================
+        // 유틸리티 함수
+        // =================================================================
+
+        /**
+         * 숫자를 천 단위 구분 기호가 있는 문자열로 포맷합니다.
+         */
+        function formatNumber(num) {
+            if (num === undefined || num === null) return 'N/A';
+            const numberValue = Number(num) || 0; 
+            return numberValue.toLocaleString('ko-KR');
+        }
+
+        /**
+         * ISO 8601 Duration 문자열을 시계열 포맷 (HH:MM:SS)으로 변환합니다.
+         * 예: PT1H30M15S -> 1:30:15
+         */
+        function formatDuration(iso8601) {
+            if (!iso8601) return 'N/A';
+            const match = iso8601.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+            if (!match) return 'N/A';
+
+            const hours = parseInt(match[1]) || 0;
+            const minutes = parseInt(match[2]) || 0;
+            const seconds = parseInt(match[3]) || 0;
+
+            const pad = (num) => String(num).padStart(2, '0');
+
+            if (hours > 0) {
+                return `${hours}:${pad(minutes)}:${pad(seconds)}`;
+            } else {
+                return `${minutes}:${pad(seconds)}`;
+            }
+        }
+
+        /**
+         * 선택된 기간에 따라 ISO 8601 형식의 'publishedAfter' 날짜를 계산합니다.
+         * @returns {string | undefined} ISO 8601 날짜 또는 undefined
+         */
+        function calculatePublishedAfter(range) {
+            const now = new Date();
+            let date = new Date(now);
+
+            switch (range) {
+                case 'today':
+                    date.setHours(0, 0, 0, 0); // 오늘 0시
+                    break;
+                case 'thisWeek':
+                    date.setDate(now.getDate() - now.getDay()); // 이번 주 일요일 (시작일)
+                    date.setHours(0, 0, 0, 0);
+                    break;
+                case 'thisMonth':
+                    date.setDate(1); // 이번 달 1일
+                    date.setHours(0, 0, 0, 0);
+                    break;
+                case 'thisYear':
+                    date.setMonth(0, 1); // 이번 년도 1월 1일
+                    date.setHours(0, 0, 0, 0);
+                    break;
+                default:
+                    return undefined;
+            }
+            return date.toISOString().split('.')[0] + 'Z'; // ISO 8601 포맷
+        }
+
+        /**
+         * UI 상태를 설정합니다.
+         * @param {boolean} isLoading
+         */
+        function setUIState(isLoading) {
+            searchButton.disabled = isLoading;
+            openModalButton.disabled = isLoading;
+            loadingIndicator.classList.toggle('hidden', !isLoading);
+        }
+
+        // =================================================================
+        // Gemini API 로직 (번역 및 요약용)
+        // =================================================================
+        const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=';
+
+        /**
+         * Gemini API를 호출하여 텍스트를 생성합니다.
+         * @param {string} prompt - LLM에 전달할 사용자 프롬프트
+         * @param {string} systemInstruction - LLM의 역할을 정의하는 시스템 지침
+         * @returns {Promise<string>} 생성된 텍스트
+         */
+        async function callGeminiApi(prompt, systemInstruction) {
+            if (!youtubeApiKey || youtubeApiKey.length < 20) {
+                 return "[API 오류: Gemini API 키가 설정되지 않았습니다. 키를 입력하고 저장해 주세요.]";
+            }
+            
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: systemInstruction }] },
+            };
+
+            const url = GEMINI_API_URL + youtubeApiKey; // **수정: youtubeApiKey 사용**
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    // API 응답 코드를 포함하여 오류 메시지 반환
+                    const errorData = await response.json().catch(() => ({}));
+                    const errorMessage = errorData.error?.message || `API call failed with status: ${response.status}`;
+                    throw new Error(errorMessage);
+                }
+
+                const result = await response.json();
+                const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "요청 처리 중 오류가 발생했습니다.";
+                return text.trim();
+
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                let cleanMessage = error.message.replace(/^Error:\s*/, ''); // Error: 접두사 제거 (UI 출력 깔끔하게)
+                return `[API 오류: ${cleanMessage}]`;
+            }
+        }
+        
+        // =================================================================
+        // 클립보드 복사 로직
+        // =================================================================
+
+        /**
+         * 태그를 클립보드에 복사하고 피드백을 제공합니다.
+         * (기존 로직 유지)
+         */
+        function copyTagsToClipboard(tagsString, buttonElement) {
+            const tempInput = document.createElement('textarea');
+            tempInput.value = tagsString;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            
+            let success = false;
+            try {
+                // document.execCommand('copy')는 iframe 환경에서 복사에 가장 신뢰할 수 있는 방법입니다.
+                success = document.execCommand('copy');
+            } catch (err) {
+                console.error('Clipboard copy failed:', err);
+            }
+            
+            document.body.removeChild(tempInput);
+
+            // 피드백 제공
+            const originalText = buttonElement.textContent;
+            const originalClasses = buttonElement.className;
+
+            if (success) {
+                buttonElement.textContent = '✅ 복사 완료!';
+                buttonElement.className = originalClasses.replace('bg-green-500', 'bg-lime-600').replace('bg-red-600', 'bg-lime-600');
+            } else {
+                buttonElement.textContent = '❌ 복사 실패!';
+                buttonElement.className = originalClasses.replace('bg-green-500', 'bg-red-600').replace('bg-lime-600', 'bg-red-600');
+            }
+
+            // 2초 후 원래대로 복구
+            setTimeout(() => {
+                buttonElement.textContent = originalText;
+                buttonElement.className = originalClasses;
+            }, 2000);
+        }
+
+        // =================================================================
+        // 검색 및 분석 로직 (3단계 요청)
+        // =================================================================
+
+        /**
+         * YouTube 검색 API (Step 1)를 호출하고, 그 결과를 바탕으로 Videos API (Step 2), Channels API (Step 3)를 호출하여 최종 데이터를 가져옵니다.
+         */
+        async function runSearchAndAnalysis() {
+            // youtubeApiKey가 기본값(하드코딩된 키)이거나 Firestore에서 로드된 유효한 키여야 검색 실행
+            if (!youtubeApiKey || youtubeApiKey.length < 20) {
+                messageBox.textContent = "🚨 YouTube API 키를 먼저 입력하고 저장해야 합니다.";
+                showApiKeyModal(true);
+                return;
+            }
+
+            setUIState(true);
+            messageBox.textContent = '';
+            resultsList.innerHTML = '';
+            searchResultsContainer.classList.add('hidden');
+
+            const keyword = searchKeywordInput.value.trim();
+            const sortBy = sortBySelect.value;
+            const maxResults = maxResultsSelect.value;
+            const videoDuration = videoDurationSelect.value;
+            const dateRange = dateRangeSelect.value;
+            const regionCode = regionCodeSelect.value;
+            const minViews = parseInt(minViewsInput.value) || 0;
+
+            if (!keyword) {
+                messageBox.textContent = "🚨 검색 키워드를 입력해 주세요.";
+                setUIState(false);
+                return;
+            }
+
+            try {
+                // --- Step 1: Search API 호출 (영상 ID 목록 및 기본 메타데이터 가져오기) ---
+                let searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&type=video&maxResults=${maxResults}&order=${sortBy}&key=${youtubeApiKey}`;
+                
+                if (videoDuration !== 'any') {
+                    searchUrl += `&videoDuration=${videoDuration}`;
+                }
+                const publishedAfter = calculatePublishedAfter(dateRange);
+                if (publishedAfter) {
+                    searchUrl += `&publishedAfter=${publishedAfter}`;
+                }
+                if (regionCode) {
+                    searchUrl += `&regionCode=${regionCode}`;
+                }
+
+                const searchResponse = await fetch(searchUrl);
+                const searchData = await searchResponse.json();
+
+                if (searchData.error) {
+                    messageBox.textContent = `Search API 오류: ${searchData.error.message}`;
+                    setUIState(false);
+                    return;
+                }
+
+                if (searchData.items.length === 0) {
+                    messageBox.textContent = `⚠️ 키워드 "${keyword}"에 대한 검색 결과가 없습니다.`;
+                    setUIState(false);
+                    return;
+                }
+
+                const videoIds = searchData.items
+                    .map(item => item.id.videoId)
+                    .filter(id => id); 
+                
+                const channelIds = searchData.items
+                    .map(item => item.snippet.channelId)
+                    .filter(id => id);
+
+                if (videoIds.length === 0) {
+                     messageBox.textContent = `⚠️ 키워드 "${keyword}"에 대한 검색 결과가 없습니다.`;
+                    setUIState(false);
+                    return;
+                }
+
+                // --- Step 2: Videos API 호출 (조회수, 좋아요 수, 길이, 상세 태그, 댓글 수 가져오기) ---
+                const videoIdsString = videoIds.join(',');
+                const videosUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${videoIdsString}&key=${youtubeApiKey}`;
+
+                const videosResponse = await fetch(videosUrl);
+                const videosData = await videosResponse.json();
+
+                if (videosData.error) {
+                    messageBox.textContent = `Videos API 오류: ${videosData.error.message}`;
+                    setUIState(false);
+                    return;
+                }
+
+                // --- Step 3: Channels API 호출 (구독자 수, 국가 가져오기) ---
+                const uniqueChannelIds = [...new Set(channelIds)];
+                const channelsIdsString = uniqueChannelIds.join(',');
+                // part=snippet 추가하여 국가 정보를 가져옵니다.
+                const channelsUrl = `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&id=${channelsIdsString}&key=${youtubeApiKey}`;
+                
+                const channelsResponse = await fetch(channelsUrl);
+                const channelsData = await channelsResponse.json();
+
+                if (channelsData.error) {
+                    console.error(`Channels API 오류: ${channelsData.error.message}`);
+                    // Channels API 오류는 검색 중단 없이 경고만 표시
+                }
+                
+                const channelStats = {};
+                if (channelsData.items) {
+                    channelsData.items.forEach(channel => {
+                        channelStats[channel.id] = {
+                            subscribers: parseInt(channel.statistics?.subscriberCount) || 0,
+                            country: channel.snippet?.country || 'N/A' // 국가 정보 추출
+                        };
+                    });
+                }
+                
+                // --- Step 4: 데이터 통합 및 클라이언트 필터링 ---
+                let finalResults = videosData.items.map(video => {
+                    const snippet = video.snippet || {};
+                    const statistics = video.statistics || {};
+                    const contentDetails = video.contentDetails || {};
+                    const channelId = snippet.channelId;
+                    const stats = channelStats[channelId] || {};
+
+                    return {
+                        id: video.id,
+                        title: snippet.title,
+                        publishedAt: snippet.publishedAt,
+                        channelTitle: snippet.channelTitle,
+                        channelId: channelId,
+                        subscriberCount: stats.subscribers || 0,
+                        channelCountry: stats.country || 'N/A', // 국가 정보 추가
+                        tags: snippet.tags || [],
+                        thumbnailUrl: snippet.thumbnails?.medium?.url || '',
+                        viewCount: parseInt(statistics.viewCount) || 0,
+                        likeCount: parseInt(statistics.likeCount) || 0,
+                        commentCount: parseInt(statistics.commentCount) || 0, // 댓글 수 추가
+                        duration: formatDuration(contentDetails.duration),
+                        description: snippet.description || "영상 설명이 제공되지 않았습니다." 
+                    };
+                });
+                
+                // 최소 조회수 클라이언트 필터링 적용
+                const filteredResults = finalResults.filter(video => video.viewCount >= minViews);
+                
+                // --- Step 5: 결과 렌더링 ---
+                renderResults(filteredResults, keyword);
+
+            } catch (error) {
+                console.error("Search/Analysis Error:", error);
+                messageBox.textContent = "😭 데이터를 가져오는 중 예상치 못한 오류가 발생했습니다. 콘솔을 확인해 주세요.";
+            } finally {
+                setUIState(false);
+            }
+        }
+
+
+        /**
+         * 검색 결과를 HTML 리스트로 렌더링합니다.
+         * @param {Array<Object>} videos - 필터링된 영상 데이터 배열
+         * @param {string} keyword - 사용자가 입력한 검색 키워드
+         */
+        function renderResults(videos, keyword) {
+            resultsList.innerHTML = ''; // 기존 결과 지우기
+            searchResultsContainer.classList.remove('hidden');
+            resultCountHeader.textContent = `검색 결과 (${formatNumber(videos.length)}개)`;
+
+            if (videos.length === 0) {
+                resultsList.innerHTML = '<p class="text-gray-500 p-4 bg-white rounded-lg shadow-md">적용된 필터 조건에 맞는 영상이 없습니다.</p>';
+                return;
+            }
+
+            const searchTerms = keyword.toLowerCase().split(/\s+/).filter(t => t.length > 0);
+
+            videos.forEach(video => {
+                const videoLink = `https://www.youtube.com/watch?v=${video.id}`;
+                const publishedDate = new Date(video.publishedAt).toLocaleDateString('ko-KR');
+                const rawTagsString = video.tags.join(', '); // 복사용 쉼표 구분 문자열
+                
+                const channelLink = `https://www.youtube.com/channel/${video.channelId}`; // 채널 링크
+                
+                // 국가 코드 -> 단축어 (2자리 코드) 사용으로 롤백 (수정된 부분)
+                const countryCode = video.channelCountry;
+                const countryDisplay = countryCode !== 'N/A' ? `<span class="text-gray-500 font-medium ml-1">(${countryCode})</span>` : ''; // 국가 표시 (2자리 코드)
+                
+                const subCountDisplay = video.subscriberCount > 0 
+                    ? `<span class="text-xs text-red-500 font-bold ml-2">(${formatNumber(video.subscriberCount)} 구독자)</span>` 
+                    : '';
+
+                // 1. 태그 목록 생성 및 순위 계산 (CRITICAL)
+                let tagsHtml = video.tags.map((tag, index) => {
+                    const tagLower = tag.toLowerCase();
+                    let rankBadge = '';
+                    
+                    // 검색 키워드에 포함되는지 확인
+                    for (const term of searchTerms) {
+                        if (tagLower.includes(term)) {
+                            // 1부터 시작하는 순위 표시
+                            rankBadge = `<span class="text-xs ml-1 font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full inline-block">(순위: ${index + 1})</span>`;
+                            break; // 첫 번째 일치하는 키워드만 순위 표시
+                        }
+                    }
+                    // 태그에 data-tag-value 속성을 추가하고 버튼으로 변경하여 클릭 가능하게 만듭니다.
+                    return `<button class="tag-search-btn bg-gray-200 text-gray-700 text-xs font-medium px-2 py-1 rounded-md inline-block mr-2 mb-1 hover:bg-blue-300 transition duration-150 active:scale-95" data-tag-value="${tag.replace(/"/g, '&quot;')}">${tag}</button>${rankBadge}`;
+                }).join('');
+
+                const copyButtonHtml = video.tags.length > 0 ? `
+                    <button 
+                        class="copy-tags-btn bg-green-500 text-white text-xs font-semibold px-2 py-1 rounded hover:bg-green-600 transition duration-150 active:scale-95"
+                        data-tags="${rawTagsString.replace(/"/g, '&quot;')}" 
+                        title="모든 태그를 쉼표로 구분하여 복사합니다."
+                    >
+                        🔗 태그 전체 복사
+                    </button>
+                ` : '';
+
+                const videoCard = `
+                    <div id="video-${video.id}" class="bg-white p-4 rounded-xl shadow-lg flex flex-col md:flex-row gap-4 border-l-4 border-blue-500 hover:shadow-xl transition duration-200">
+                        
+                        <!-- 썸네일 및 길이 (좌측) -->
+                        <div class="relative w-full md:w-56 flex-shrink-0">
+                            <a href="${videoLink}" target="_blank" rel="noopener noreferrer">
+                                <img src="${video.thumbnailUrl}" alt="${video.title}" class="w-full h-auto rounded-lg shadow-md object-cover">
+                            </a>
+                            <span class="duration-overlay">${video.duration}</span>
+                        </div>
+
+                        <!-- 내용 (우측) -->
+                        <div class="flex-grow">
+                            <!-- 제목 -->
+                            <div class="flex items-center mb-1">
+                                <h3 class="text-lg font-bold text-gray-900 line-clamp-2 mr-2">
+                                    <a href="${videoLink}" target="_blank" rel="noopener noreferrer" class="hover:text-blue-600 transition duration-150">${video.title}</a>
+                                </h3>
+                                <!-- 번역 버튼 -->
+                                <button data-id="${video.id}" data-type="translate" data-title="${video.title.replace(/"/g, '&quot;')}" class="action-btn text-xs bg-gray-100 text-gray-600 hover:bg-blue-500 hover:text-white font-semibold py-1 px-2 rounded-full transition duration-150 active:scale-95 flex items-center">
+                                    <span class="action-text">번역</span>
+                                </button>
+                                <!-- 요약 버튼 -->
+                                <button data-id="${video.id}" data-type="summary" data-description="${video.description.replace(/"/g, '&quot;')}" class="action-btn text-xs bg-gray-100 text-gray-600 hover:bg-blue-500 hover:text-white font-semibold py-1 px-2 rounded-full ml-1 transition duration-150 active:scale-95 flex items-center">
+                                    <span class="action-text">요약</span>
+                                </button>
+                            </div>
+                            
+                            <!-- 채널명 및 날짜 -->
+                            <p class="text-sm text-blue-600 font-medium mb-2">
+                                <a href="${channelLink}" target="_blank" rel="noopener noreferrer" class="hover:underline">${video.channelTitle}</a> ${countryDisplay} ${subCountDisplay} · ${publishedDate} 업로드
+                            </p>
+
+                            <!-- 통계 (조회수, 좋아요, 댓글 수) -->
+                            <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm mb-3">
+                                <span class="font-semibold text-gray-700">
+                                    조회수: <span class="text-green-600">${formatNumber(video.viewCount)}</span>회
+                                </span>
+                                <span class="font-semibold text-gray-700">
+                                    좋아요: <span class="text-red-500">${formatNumber(video.likeCount)}</span>개
+                                </span>
+                                <span class="font-semibold text-gray-700">
+                                    댓글 수: <span class="text-indigo-600">${formatNumber(video.commentCount)}</span>개
+                                </span>
+                            </div>
+                            
+                            <!-- 요약/번역 결과 표시 영역 -->
+                            <div id="result-area-${video.id}" class="hidden mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-gray-800">
+                                <div id="result-content-${video.id}"></div>
+                            </div>
+
+
+                            <!-- 태그 목록 및 복사 버튼 -->
+                            <div class="mt-2 pt-2 border-t border-gray-100">
+                                <div class="flex items-center justify-between mb-1">
+                                    <p class="text-xs font-semibold text-gray-500">태그 (${video.tags.length}개):</p>
+                                    ${copyButtonHtml}
+                                </div>
+                                <div class="flex flex-wrap items-center">
+                                    ${tagsHtml || '<span class="text-xs text-gray-400">태그 정보 없음</span>'}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                resultsList.insertAdjacentHTML('beforeend', videoCard);
+            });
+        }
+
+        // =================================================================
+        // 이벤트 핸들러 (Gemini API 호출)
+        // =================================================================
+        
+        async function handleActionClick(button) {
+            const videoId = button.dataset.id;
+            const type = button.dataset.type;
+            const resultArea = document.getElementById(`result-area-${videoId}`);
+            const resultContent = document.getElementById(`result-content-${videoId}`);
+            const actionText = button.querySelector('.action-text');
+
+            // 토글 로직: 이미 열려있다면 닫기
+            if (!resultArea.classList.contains('hidden') && button.dataset.currentType === type) {
+                resultArea.classList.add('hidden');
+                button.dataset.currentType = '';
+                return;
+            }
+            
+            // 로딩 상태 시작
+            const originalText = actionText.textContent;
+            actionText.innerHTML = '<div class="spinner-sm"></div>';
+            button.disabled = true;
+
+            resultArea.classList.remove('hidden');
+            resultContent.innerHTML = `<p class="text-gray-500">요청 중...</p>`;
+            
+            let result = '';
+            let systemPrompt = '';
+            let userPrompt = '';
+            
+            if (type === 'translate') {
+                const title = button.dataset.title;
+                systemPrompt = "You are a professional Korean translator. Translate the given text naturally and concisely into Korean, outputting only the translated title.";
+                userPrompt = `Translate the following YouTube video title into Korean: "${title}"`;
+                result = await callGeminiApi(userPrompt, systemPrompt);
+                
+                resultContent.innerHTML = `<p class="font-bold mb-1">제목 번역 결과:</p><p class="whitespace-pre-wrap">${result}</p>`;
+            } else if (type === 'summary') {
+                const description = button.dataset.description;
+                
+                if (description === "영상 설명이 제공되지 않았습니다." || description.trim().length < 10) {
+                    result = "영상의 설명이 너무 짧거나 제공되지 않아 요약할 수 없습니다. (요약은 영상의 설명(Description)을 기반으로 합니다.)";
+                } else {
+                    // 사용자 요청에 따라 요약 길이를 5~8 문장 길이의 단락으로 늘림 (최대 10줄 이내)
+                    systemPrompt = "You are a professional video content summarizer. Summarize the provided text (video description) into a concise paragraph of 5 to 8 sentences in Korean. Output only the summarized paragraph.";
+                    userPrompt = `다음 YouTube 영상 설명(Description)을 한국어로 5~8 문장 길이의 단락으로 요약해 주세요:\n\n---\n\n${description}`;
+                    result = await callGeminiApi(userPrompt, systemPrompt);
+                }
+
+                // 단락 스타일로 변경하여 긴 요약에 대응
+                resultContent.innerHTML = `<p class="font-bold mb-1">설명 요약 결과:</p><p class="whitespace-pre-wrap">${result}</p>`;
+            }
+
+            // 로딩 상태 종료
+            actionText.textContent = originalText;
+            button.disabled = false;
+            button.dataset.currentType = type; // 현재 활성화된 타입 기록
+        }
+        
+        // =================================================================
+        // 이벤트 리스너 등록
+        // =================================================================
+
+        // 1. 검색 버튼
+        searchButton.addEventListener('click', runSearchAndAnalysis);
+        searchKeywordInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                runSearchAndAnalysis();
+            }
+        });
+
+        // 2. 키 변경 버튼 (API 키 모달 열기)
+        openModalButton.addEventListener('click', () => {
+            if (youtubeApiKey) {
+                apiKeyInput.value = youtubeApiKey;
+            }
+            showApiKeyModal(true);
+        });
+
+        // 3. 모달 저장 버튼
+        saveApiKeyButton.addEventListener('click', () => {
+            const key = apiKeyInput.value.trim();
+            if (key.length < 20) { 
+                modalMessage.textContent = "유효한 API 키를 입력해 주세요.";
+                modalMessage.classList.remove('hidden');
+                return;
+            }
+            saveApiKey(key);
+        });
+
+        // 4. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
+        resultsList.addEventListener('click', (event) => {
+            // 태그 복사 버튼 처리
+            const copyButton = event.target.closest('.copy-tags-btn');
+            if (copyButton) {
+                const tagsString = copyButton.dataset.tags;
+                if (tagsString) {
+                    copyTagsToClipboard(tagsString, copyButton);
+                }
+                return;
+            }
+            
+            // 번역/요약 버튼 처리
+            const actionButton = event.target.closest('.action-btn');
+            if (actionButton) {
+                handleActionClick(actionButton);
+            }
+
+            // 태그 검색 버튼 처리 (새로운 기능)
+            const tagButton = event.target.closest('.tag-search-btn');
+            if (tagButton) {
+                const tagValue = tagButton.dataset.tagValue;
+                if (tagValue) {
+                    searchKeywordInput.value = tagValue; // 검색 키워드 필드에 태그 값 설정
+                    runSearchAndAnalysis(); // 검색 실행
+                }
+            }
+        });
+        
+        // 5. 초기화
+        window.addEventListener('load', initializeFirebase);
+    </script>
+</body>
+</html>
