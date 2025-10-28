@@ -155,13 +155,7 @@
                 >
                     검색 시작
                 </button>
-                <button
-                    id="openModalButton"
-                    class="bg-gray-400 text-white font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-gray-500 transition duration-150 active:scale-95"
-                    title="API 키 다시 입력"
-                >
-                    🔑 키 변경
-                </button>
+                <!-- API 키 변경 버튼 제거됨 -->
             </div>
 
             <!-- 2. 고급 필터 옵션 -->
@@ -342,7 +336,7 @@
         // DOM 요소 캐시
         const searchKeywordInput = document.getElementById('searchKeyword');
         const searchButton = document.getElementById('searchButton');
-        const openModalButton = document.getElementById('openModalButton');
+        // const openModalButton = document.getElementById('openModalButton'); // API 키 변경 버튼 제거됨
         const messageBox = document.getElementById('messageBox');
         const loadingIndicator = document.getElementById('loadingIndicator');
 
@@ -439,16 +433,17 @@
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     youtubeApiKey = data.key; // Load from Firestore if exists
+                    messageBox.textContent = "✅ 저장된 API 키를 사용하여 앱을 로드했습니다.";
                     console.log("API Key loaded successfully from Firestore.");
                 } else {
                     console.log("No stored API Key found. Using default hardcoded key.");
-                    // youtubeApiKey는 이미 DEFAULT_YOUTUBE_API_KEY로 설정되어 있으므로 별도 설정 불필요
-                    showApiKeyModal(true); // 키 입력 창은 띄워서 확인하도록 유도
+                    messageBox.textContent = "ℹ️ 저장된 키가 없어 기본 API 키로 작동을 시작합니다.";
+                    // showApiKeyModal(true); // <-- 요청에 따라 제거됨
                 }
             } catch (e) {
-                console.error("Error loading API key:", e);
-                // 오류 발생 시 모달을 띄워 사용자에게 키 입력 유도
-                showApiKeyModal(true); 
+                console.error("Error loading API key from Firestore:", e);
+                messageBox.textContent = "⚠️ 저장된 API 키를 불러오는 중 오류가 발생했습니다. 기본 API 키로 시작합니다.";
+                // showApiKeyModal(true); // <-- 요청에 따라 제거됨
             }
         }
 
@@ -559,7 +554,7 @@
          */
         function setUIState(isLoading) {
             searchButton.disabled = isLoading;
-            openModalButton.disabled = isLoading;
+            // openModalButton.disabled = isLoading; // API 키 변경 버튼 제거로 인해 주석 처리
             loadingIndicator.classList.toggle('hidden', !isLoading);
         }
 
@@ -569,7 +564,7 @@
         const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=';
 
         /**
-         * Gemini API를 호출하여 텍스트를 생성합니다.
+         * Gemini API를 호출하여 텍스트를 생성합니다. (Exponential Backoff 적용)
          * @param {string} prompt - LLM에 전달할 사용자 프롬프트
          * @param {string} systemInstruction - LLM의 역할을 정의하는 시스템 지침
          * @returns {Promise<string>} 생성된 텍스트
@@ -584,31 +579,71 @@
                 systemInstruction: { parts: [{ text: systemInstruction }] },
             };
 
-            const url = GEMINI_API_URL + youtubeApiKey; // **수정: youtubeApiKey 사용**
+            const url = GEMINI_API_URL + youtubeApiKey;
+            const MAX_RETRIES = 3; 
+            let lastErrorMessage = '';
 
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
 
-                if (!response.ok) {
-                    // API 응답 코드를 포함하여 오류 메시지 반환
-                    const errorData = await response.json().catch(() => ({}));
-                    const errorMessage = errorData.error?.message || `API call failed with status: ${response.status}`;
-                    throw new Error(errorMessage);
+                    if (!response.ok) {
+                        const errorData = await response.json().catch(() => ({}));
+                        const errorMessage = errorData.error?.message || `API call failed with status: ${response.status}`;
+                        lastErrorMessage = errorMessage;
+                        
+                        // Check for transient errors (Overloaded, Too Many Requests, Server Error)
+                        if (response.status === 429 || 
+                            response.status >= 500 || // 5xx server errors often temporary
+                            errorMessage.includes("overloaded") || 
+                            errorMessage.includes("rate limit")) {
+
+                            // Transient error: proceed to retry
+                            if (attempt < MAX_RETRIES - 1) {
+                                // Exponential Backoff with Jitter
+                                const delay = Math.pow(2, attempt) * 1000 + (Math.random() * 1000); 
+                                console.warn(`Transient API error (Attempt ${attempt + 1}/${MAX_RETRIES}). Retrying in ${Math.round(delay/1000)}s...`);
+                                await new Promise(resolve => setTimeout(resolve, delay));
+                                continue; // Skip to next iteration (retry)
+                            } else {
+                                // Max retries reached
+                                throw new Error(errorMessage); 
+                            }
+                        } else {
+                            // Non-transient error (e.g., 400 Bad Request, 403 Forbidden - requires user action)
+                            throw new Error(errorMessage);
+                        }
+                    }
+
+                    // Success
+                    const result = await response.json();
+                    const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "요청 처리 중 오류가 발생했습니다.";
+                    return text.trim();
+
+                } catch (error) {
+                    // Catch network errors or specific errors thrown above
+                    if (attempt < MAX_RETRIES - 1 && (error.message.includes("Failed to fetch") || error.message.includes("overloaded"))) {
+                        // For network errors or if we missed an overload error, retry (though status check is better)
+                        const delay = Math.pow(2, attempt) * 1000 + (Math.random() * 1000); 
+                        console.warn(`Network/Transient API error (Attempt ${attempt + 1}/${MAX_RETRIES}). Retrying in ${Math.round(delay/1000)}s...`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue;
+                    } else {
+                        // Re-throw if max retries reached or it's a critical error
+                        lastErrorMessage = lastErrorMessage || error.message;
+                        break; // Exit loop to handle final error
+                    }
                 }
-
-                const result = await response.json();
-                const text = result.candidates?.[0]?.content?.parts?.[0]?.text || "요청 처리 중 오류가 발생했습니다.";
-                return text.trim();
-
-            } catch (error) {
-                console.error("Gemini API Error:", error);
-                let cleanMessage = error.message.replace(/^Error:\s*/, ''); // Error: 접두사 제거 (UI 출력 깔끔하게)
-                return `[API 오류: ${cleanMessage}]`;
             }
+            
+            // Final error handling after retry loop
+            console.error("Gemini API Error (Final):", lastErrorMessage);
+            let cleanMessage = lastErrorMessage.replace(/^Error:\s*/, '');
+            return `[API 오류: ${cleanMessage}]`;
         }
         
         // =================================================================
@@ -1072,6 +1107,51 @@
             }
         }
 
+        /**
+         * 연관 검색 키워드를 Gemini API를 통해 가져와 렌더링합니다.
+         */
+        async function fetchRelatedKeywords(keyword) {
+            relatedKeywordsLoading.classList.remove('hidden');
+            relatedKeywordsList.innerHTML = '';
+            
+            const systemPrompt = "You are an SEO and content strategy expert. Based on the user's primary keyword, generate a list of 20 high-value, long-tail related search queries/keywords that are relevant to YouTube video content. Respond only with a comma-separated list of the 20 keywords, with no prefix, suffix, or explanation.";
+            const userPrompt = `Generate 20 related search keywords for YouTube based on the primary keyword: "${keyword}"`;
+
+            try {
+                const resultText = await callGeminiApi(userPrompt, systemPrompt);
+
+                // 결과 텍스트를 쉼표로 분리하여 최대 20개의 키워드 배열 생성
+                const keywords = resultText.split(',').map(k => k.trim()).filter(k => k.length > 1).slice(0, 20);
+
+                if (keywords.length > 0) {
+                    keywords.forEach(key => {
+                        const simulatedVolume = generateSimulatedVolume(key, trendRangeSelect.value);
+                        const keywordHtml = `
+                            <button 
+                                class="tag-search-btn bg-blue-500 text-white text-xs font-semibold px-3 py-1 rounded-full hover:bg-blue-600 transition duration-150 active:scale-95 flex items-center group" 
+                                data-tag-value="${key.replace(/"/g, '&quot;')}"
+                                data-keyword-volume="${simulatedVolume}"
+                                title="클릭하여 연관 키워드로 검색"
+                            >
+                                ${key} 
+                                <span class="ml-2 font-bold text-yellow-300 group-hover:text-yellow-200 transition duration-150 text-xs">
+                                    ${formatNumber(simulatedVolume)}회
+                                </span>
+                            </button>
+                        `;
+                        relatedKeywordsList.insertAdjacentHTML('beforeend', keywordHtml);
+                    });
+                } else {
+                    relatedKeywordsList.innerHTML = '<span class="text-gray-500">연관 키워드를 생성하지 못했습니다.</span>';
+                }
+
+            } catch (error) {
+                relatedKeywordsList.innerHTML = `<span class="text-red-500">${error}</span>`;
+            } finally {
+                relatedKeywordsLoading.classList.add('hidden');
+            }
+        }
+
 
         /**
          * 검색 결과를 HTML 리스트로 렌더링합니다.
@@ -1288,13 +1368,9 @@
         regionCodeSelect.addEventListener('change', fetchAndRenderTrends);
 
 
-        // 4. 키 변경 버튼 (API 키 모달 열기)
-        openModalButton.addEventListener('click', () => {
-            if (youtubeApiKey) {
-                apiKeyInput.value = youtubeApiKey;
-            }
-            showApiKeyModal(true);
-        });
+        // 4. 키 변경 버튼 (API 키 모달 열기) 제거됨. 
+        // 키 변경 모달은 이제 키가 없을 때만 loadApiKey에서 자동으로 호출됩니다.
+        // openModalButton.addEventListener('click', ...) 제거됨.
 
         // 5. 모달 저장 버튼
         saveApiKeyButton.addEventListener('click', () => {
