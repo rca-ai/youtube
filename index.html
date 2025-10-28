@@ -64,6 +64,35 @@
             border-radius: 4px;
             font-weight: 500;
         }
+        /* 트렌드 항목 스타일 */
+        .trend-item {
+            display: flex;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+        .trend-item:hover {
+            background-color: #f9f9f9;
+        }
+        .trend-rank {
+            width: 30px;
+            font-weight: bold;
+            text-align: right;
+            margin-right: 12px;
+            color: #3b82f6;
+        }
+        .trend-keyword {
+            flex-grow: 1;
+            font-size: 0.9rem;
+            color: #1f2937;
+        }
+        .trend-volume {
+            font-size: 0.85rem;
+            color: #4b5563;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body class="p-4 sm:p-8">
@@ -170,9 +199,9 @@
                     </select>
                 </div>
 
-                <!-- 기간 -->
+                <!-- 기간 (이 트렌드 필터로 사용됨) -->
                 <div>
-                    <label for="dateRange" class="block text-gray-700 font-medium mb-1">기간</label>
+                    <label for="dateRange" class="block text-gray-700 font-medium mb-1">기간 (트렌드 기준)</label>
                     <select id="dateRange" class="w-full p-2 border border-gray-300 rounded-lg">
                         <option value="all">전체 (기본)</option>
                         <option value="today">오늘</option>
@@ -188,9 +217,9 @@
                     <input type="number" id="minViews" placeholder="0" value="0" min="0" class="w-full p-2 border border-gray-300 rounded-lg">
                 </div>
                 
-                <!-- 국가 (리전) -->
+                <!-- 국가 (리전 - 이 트렌드 필터로 사용됨) -->
                 <div>
-                    <label for="regionCode" class="block text-gray-700 font-medium mb-1">국가</label>
+                    <label for="regionCode" class="block text-gray-700 font-medium mb-1">국가 (트렌드 기준)</label>
                     <select id="regionCode" class="w-full p-2 border border-gray-300 rounded-lg">
                         <option value="">전체 (기본)</option>
                         <option value="KR">대한민국</option>
@@ -214,7 +243,20 @@
             </div>
         </div>
 
-        <!-- 검색량 분석 및 연관 키워드 섹션 (새로 추가됨) -->
+        <!-- 글로벌 YouTube 트렌드 분석 섹션 (초기 화면부터 표시) -->
+        <div id="youtubeTrendsDashboard" class="bg-white p-6 rounded-xl shadow-lg mb-8">
+            <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between">
+                <span id="globalTrendTitle">글로벌 YouTube 트렌드 검색 순위</span>
+                <span id="trendFilterDisplay" class="text-sm font-medium text-blue-600">(전체 기간, 글로벌)</span>
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="trendingResultsContainer">
+                <div class="md:col-span-3 text-center text-gray-500" id="initialTrendMessage">
+                    필터를 선택하면 해당 기준의 트렌드 순위 (시뮬레이션)가 표시됩니다.
+                </div>
+            </div>
+        </div>
+        
+        <!-- 검색량 분석 및 연관 키워드 섹션 (검색 후 표시) -->
         <div id="searchVolumeAnalysis" class="hidden bg-white p-6 rounded-xl shadow-lg mb-8">
             <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between">
                 <span id="analysisTitle">키워드 검색량 및 연관 분석 결과 (시뮬레이션 - 월간)</span>
@@ -317,9 +359,9 @@
         const sortBySelect = document.getElementById('sortBy');
         const maxResultsSelect = document.getElementById('maxResults');
         const videoDurationSelect = document.getElementById('videoDuration');
-        const dateRangeSelect = document.getElementById('dateRange');
+        const dateRangeSelect = document.getElementById('dateRange'); // 트렌드 기간 필터로도 사용
         const minViewsInput = document.getElementById('minViews');
-        const regionCodeSelect = document.getElementById('regionCode');
+        const regionCodeSelect = document.getElementById('regionCode'); // 트렌드 국가 필터로도 사용
         const tagInclusionCheckbox = document.getElementById('tagInclusion');
 
         // 새로운 요소 캐시 (검색량 분석 관련)
@@ -328,6 +370,13 @@
         const relatedKeywordsList = document.getElementById('relatedKeywordsList');
         const relatedKeywordsLoading = document.getElementById('relatedKeywordsLoading');
         const analysisTitle = document.getElementById('analysisTitle');
+        
+        // 글로벌 트렌드 요소 캐시
+        const youtubeTrendsDashboard = document.getElementById('youtubeTrendsDashboard');
+        const trendingResultsContainer = document.getElementById('trendingResultsContainer');
+        const globalTrendTitle = document.getElementById('globalTrendTitle');
+        const trendFilterDisplay = document.getElementById('trendFilterDisplay');
+        const initialTrendMessage = document.getElementById('initialTrendMessage');
         
         let searchVolumeChartInstance = null; // Chart.js 인스턴스를 저장할 변수
         let currentKeyword = ''; // 현재 검색된 키워드를 저장할 변수
@@ -377,6 +426,9 @@
                 // Firebase 초기화 실패 시 메시지 박스에 출력
                 messageBox.textContent = "Firebase 초기화 중 오류가 발생했습니다. 키 저장이 불가능합니다.";
             }
+            
+            // 초기 로드 시 글로벌 트렌드 데이터 표시
+            fetchAndRenderTrends(); 
         }
         
         async function loadApiKey() {
@@ -559,6 +611,21 @@
             }
         }
         
+        // =================================================================
+        // 트렌드 검색 순위 로직 (시뮬레이션)
+        // =================================================================
+        
+        // 국가 이름 매핑 (트렌드 표시용)
+        const REGION_NAMES = {
+            'KR': '대한민국', 'US': '미국', 'JP': '일본', 'GB': '영국', 'DE': '독일', 
+            'CN': '중국', 'VN': '베트남', 'TH': '태국', '': '글로벌'
+        };
+        
+        const TIME_RANGE_NAMES = {
+            'today': '오늘', 'thisWeek': '이번 주', 'thisMonth': '이번 달', 
+            'thisYear': '이번 년', 'all': '전체 기간'
+        };
+
         /**
          * 임의의 단일 검색량 값을 생성합니다. (시뮬레이션)
          */
@@ -568,9 +635,9 @@
             let baseValue = (Math.floor(Math.random() * 5000) + 5000) * lengthFactor; 
             
             // 기간별 배율 조정
-            if (range === 'weekly') {
+            if (range === 'weekly' || range === 'thisWeek') {
                 baseValue = baseValue / 4; 
-            } else if (range === 'yearly') {
+            } else if (range === 'yearly' || range === 'thisYear') {
                 baseValue = baseValue * 10;
             }
             
@@ -579,54 +646,92 @@
             
             return Math.max(100, Math.round(volume));
         }
+        
+        /**
+         * 임의의 트렌드 데이터를 생성합니다. (YouTube API는 이 데이터를 제공하지 않으므로 시뮬레이션)
+         */
+        function generateTrendingData(regionCode, timeRange) {
+            const trends = [];
+            
+            // 국가 및 기간별 특화된 시뮬레이션 키워드 목록
+            const baseKeywords = [
+                "2025년 IT 트렌드 분석", "Gemini API 코딩 비법", "최신 인공지능 기술", "주식 시장 단타 전략",
+                "K-POP 신곡 뮤직비디오", "유럽 낭만 여행 vlog", "집에서 10분 칼로리 소모", "에어프라이어 만능 레시피",
+                "부동산 경매 기본", "초보자를 위한 영어 회화", "데이터 분석 자격증", "인기 웹툰 결말 분석",
+                "20대 재테크 필수", "갓생 루틴 만들기", "힐링 ASMR 수면 유도", "편안한 명상 음악",
+                "갤럭시 S26 스펙 유출", "아이폰 17 예상 디자인", "미니멀 패션 스타일링", "전기차 충전소 위치"
+            ];
+
+            const popularKeywords = baseKeywords.sort(() => 0.5 - Math.random()); // 무작위로 섞기
+            
+            popularKeywords.slice(0, 20).forEach((keyword, index) => {
+                let score = (20 - index) * 1000 + Math.floor(Math.random() * 500);
+                
+                // 지역/시간 가중치 시뮬레이션
+                if (regionCode === 'KR' && (keyword.includes('K-POP') || keyword.includes('주식') || keyword.includes('부동산'))) score *= 1.5;
+                if (regionCode === 'US' && (keyword.includes('IT') || keyword.includes('AI'))) score *= 1.4;
+                if (timeRange === 'thisWeek' || timeRange === 'today') score *= 1.2;
+                if (timeRange === 'thisYear') score *= 0.8;
+                
+                trends.push({
+                    rank: index + 1,
+                    keyword: keyword,
+                    score: Math.round(score),
+                    volume: generateSimulatedVolume(keyword, timeRange) // 볼륨 값 추가
+                });
+            });
+
+            // 점수 기준으로 최종 순위 결정
+            return trends.sort((a, b) => b.score - a.score).map((item, index) => ({
+                ...item,
+                rank: index + 1 // 재정렬된 순위
+            }));
+        }
 
         /**
-         * Gemini API를 호출하여 연관 키워드를 생성하고 표시합니다.
-         * @param {string} keyword - 분석할 메인 키워드
+         * 글로벌 트렌드 키워드를 렌더링합니다.
          */
-        async function fetchRelatedKeywords(keyword) {
-            relatedKeywordsList.innerHTML = '';
-            relatedKeywordsLoading.classList.remove('hidden');
-            const currentRange = trendRangeSelect.value;
-
-            // **수정된 부분: 20개의 연관 키워드 요청**
-            const systemPrompt = "You are an expert YouTube SEO analyst. Generate approximately 20 highly relevant and specific long-tail keywords based on the user's main keyword. Output the keywords as a single, comma-separated string, nothing else.";
-            const userPrompt = `Generate approximately 20 related Korean YouTube search keywords for: "${keyword}"`;
-
-            try {
-                const result = await callGeminiApi(userPrompt, systemPrompt);
-                
-                if (result.startsWith('[API 오류:')) {
-                    relatedKeywordsList.innerHTML = `<span class="text-red-500 text-sm">${result}</span>`;
-                } else {
-                    const keywords = result.split(',').map(k => k.trim()).filter(k => k.length > 0);
-                    
-                    if (keywords.length > 0) {
-                        const keywordHtml = keywords.map(kw => {
-                            const volume = generateSimulatedVolume(kw, currentRange);
-                            return `
-                                <button 
-                                    class="tag-search-btn text-xs bg-blue-100 text-blue-800 font-semibold px-2 py-1 rounded-full hover:bg-blue-200 transition active:scale-95 flex items-center" 
-                                    data-tag-value="${kw.replace(/"/g, '&quot;')}"
-                                    data-keyword-volume="${volume}"
-                                >
-                                    ${kw} <span class="ml-2 font-bold text-gray-700 bg-white px-1 rounded-sm">${formatNumber(volume)}회</span>
-                                </button>
-                            `;
-                        }).join('');
-                        relatedKeywordsList.innerHTML = keywordHtml;
-                    } else {
-                        relatedKeywordsList.innerHTML = `<span class="text-gray-500 text-sm">연관 키워드를 찾지 못했습니다.</span>`;
-                    }
-                }
-
-            } catch(e) {
-                 relatedKeywordsList.innerHTML = `<span class="text-red-500 text-sm">연관 키워드 분석 중 오류 발생.</span>`;
-            } finally {
-                relatedKeywordsLoading.classList.add('hidden');
+        function renderTrendingKeywords(trends) {
+            trendingResultsContainer.innerHTML = '';
+            initialTrendMessage.classList.add('hidden');
+            
+            if (trends.length === 0) {
+                 trendingResultsContainer.innerHTML = '<div class="md:col-span-3 text-center text-gray-500 p-4">트렌드 데이터가 없습니다. 필터를 변경해보세요.</div>';
+                 return;
             }
+
+            trends.forEach(item => {
+                const trendItemHtml = `
+                    <div 
+                        class="trend-item bg-white rounded-lg shadow-sm hover:shadow-md transition duration-150 p-3"
+                        data-tag-value="${item.keyword.replace(/"/g, '&quot;')}"
+                    >
+                        <span class="trend-rank text-lg">${item.rank}</span>
+                        <span class="trend-keyword">${item.keyword}</span>
+                        <span class="trend-volume">${formatNumber(item.volume)}회</span>
+                    </div>
+                `;
+                trendingResultsContainer.insertAdjacentHTML('beforeend', trendItemHtml);
+            });
         }
         
+        /**
+         * 필터 설정에 따라 트렌드 데이터를 가져와 렌더링하고 UI를 업데이트합니다.
+         */
+        function fetchAndRenderTrends() {
+            const regionCode = regionCodeSelect.value;
+            const dateRange = dateRangeSelect.value;
+            
+            const trends = generateTrendingData(regionCode, dateRange);
+            renderTrendingKeywords(trends);
+            
+            // 필터 디스플레이 업데이트
+            const regionName = REGION_NAMES[regionCode] || '전체';
+            const rangeName = TIME_RANGE_NAMES[dateRange] || '전체 기간';
+            trendFilterDisplay.textContent = `(${rangeName}, ${regionName})`;
+        }
+
+
         /**
          * 검색량 추이 범위 변경 시 이미 표시된 연관 키워드의 볼륨을 업데이트합니다.
          */
@@ -651,7 +756,6 @@
             const rangeText = trendRangeSelect.options[trendRangeSelect.selectedIndex].text;
             analysisTitle.textContent = `키워드 검색량 및 연관 분석 결과 (시뮬레이션 - ${rangeText})`;
         }
-
 
         // =================================================================
         // 클립보드 복사 로직
@@ -1010,7 +1114,7 @@
                     for (const term of searchTerms) {
                         if (tagLower.includes(term)) {
                             // 1부터 시작하는 순위 표시
-                            rankBadge = `<span class="text-xs ml-1 font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full inline-block">(순위: ${index + 1})</span>`;
+                            rankBadge = `<span class="text-xs ml-1 font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full inline-block">(순위: ${index + 1})`;
                             break; // 첫 번째 일치하는 키워드만 순위 표시
                         }
                     }
@@ -1168,7 +1272,7 @@
             }
         });
         
-        // 2. 검색량 추이 범위 변경 버튼
+        // 2. 검색량 추이 범위 변경 버튼 (검색 후 그래프)
         trendRangeSelect.addEventListener('change', () => {
             const newRange = trendRangeSelect.value;
             if (currentKeyword) {
@@ -1178,8 +1282,13 @@
                 updateRelatedKeywordVolumes(newRange); 
             }
         });
+        
+        // 3. 글로벌 트렌드 필터 변경 (기간 및 국가)
+        dateRangeSelect.addEventListener('change', fetchAndRenderTrends);
+        regionCodeSelect.addEventListener('change', fetchAndRenderTrends);
 
-        // 3. 키 변경 버튼 (API 키 모달 열기)
+
+        // 4. 키 변경 버튼 (API 키 모달 열기)
         openModalButton.addEventListener('click', () => {
             if (youtubeApiKey) {
                 apiKeyInput.value = youtubeApiKey;
@@ -1187,7 +1296,7 @@
             showApiKeyModal(true);
         });
 
-        // 4. 모달 저장 버튼
+        // 5. 모달 저장 버튼
         saveApiKeyButton.addEventListener('click', () => {
             const key = apiKeyInput.value.trim();
             if (key.length < 20) { 
@@ -1198,7 +1307,7 @@
             saveApiKey(key);
         });
 
-        // 5. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
+        // 6. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
         resultsList.addEventListener('click', (event) => {
             // 태그 복사 버튼 처리
             const copyButton = event.target.closest('.copy-tags-btn');
@@ -1227,7 +1336,7 @@
             }
         });
         
-        // 6. 연관 키워드 버튼 처리 (이벤트 위임 사용)
+        // 7. 연관 키워드 버튼 처리 (이벤트 위임 사용)
         searchVolumeAnalysis.addEventListener('click', (event) => {
             const tagButton = event.target.closest('.tag-search-btn');
             if (tagButton) {
@@ -1238,10 +1347,21 @@
                 }
             }
         });
-
+        
+        // 8. 글로벌 트렌드 키워드 클릭 시 검색 실행
+        youtubeTrendsDashboard.addEventListener('click', (event) => {
+            const trendItem = event.target.closest('.trend-item');
+            if (trendItem) {
+                const keyword = trendItem.dataset.tagValue;
+                if (keyword) {
+                    searchKeywordInput.value = keyword;
+                    runSearchAndAnalysis();
+                }
+            }
+        });
 
         
-        // 7. 초기화
+        // 9. 초기화
         window.addEventListener('load', initializeFirebase);
     </script>
 </body>
