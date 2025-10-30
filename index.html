@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YouTube 영상 검색 대시보드</title>
+    <title>YouTube Trend 분석</title>
     <!-- Tailwind CSS CDN 로드 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
@@ -125,8 +125,8 @@
     <div class="max-w-6xl mx-auto">
         <!-- 헤더 및 타이틀 -->
         <header class="text-center mb-8">
-            <h1 class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2">
-                YouTube 영상 검색 대시보드
+            <h1 id="mainTitle" class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2 cursor-pointer hover:text-blue-600 transition duration-150" title="클릭하여 초기 화면으로 이동">
+                YouTube Trend 분석
             </h1>
             <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요.</p>
         </header>
@@ -334,6 +334,7 @@
         let youtubeApiKey = DEFAULT_YOUTUBE_API_KEY; // Pre-fill with the user-provided key
 
         // DOM 요소 캐시
+        const mainTitle = document.getElementById('mainTitle');
         const searchKeywordInput = document.getElementById('searchKeyword');
         const searchButton = document.getElementById('searchButton');
         // const openModalButton = document.getElementById('openModalButton'); // API 키 변경 버튼 제거됨
@@ -421,8 +422,8 @@
                 messageBox.textContent = "Firebase 초기화 중 오류가 발생했습니다. 키 저장이 불가능합니다.";
             }
             
-            // 초기 로드 시 글로벌 트렌드 데이터 표시
-            fetchAndRenderTrends(); 
+            // 초기 로드 시 글로벌 트렌드 데이터 표시 (검색 키워드 없음)
+            fetchAndRenderTrends(''); 
         }
         
         async function loadApiKey() {
@@ -684,18 +685,36 @@
         
         /**
          * 임의의 트렌드 데이터를 생성합니다. (YouTube API는 이 데이터를 제공하지 않으므로 시뮬레이션)
+         * @param {string} regionCode - 국가 코드
+         * @param {string} timeRange - 시간 범위
+         * @param {string} searchKeyword - 검색 키워드 (연관성 부여용)
          */
-        function generateTrendingData(regionCode, timeRange) {
+        function generateTrendingData(regionCode, timeRange, searchKeyword = '') {
             const trends = [];
             
             // 국가 및 기간별 특화된 시뮬레이션 키워드 목록
-            const baseKeywords = [
+            let baseKeywords = [
                 "2025년 IT 트렌드 분석", "Gemini API 코딩 비법", "최신 인공지능 기술", "주식 시장 단타 전략",
                 "K-POP 신곡 뮤직비디오", "유럽 낭만 여행 vlog", "집에서 10분 칼로리 소모", "에어프라이어 만능 레시피",
                 "부동산 경매 기본", "초보자를 위한 영어 회화", "데이터 분석 자격증", "인기 웹툰 결말 분석",
                 "20대 재테크 필수", "갓생 루틴 만들기", "힐링 ASMR 수면 유도", "편안한 명상 음악",
                 "갤럭시 S26 스펙 유출", "아이폰 17 예상 디자인", "미니멀 패션 스타일링", "전기차 충전소 위치"
             ];
+
+            // 검색 키워드가 있는 경우, 해당 키워드를 포함하여 관련성을 높입니다.
+            if (searchKeyword) {
+                 // 키워드와 관련된 5개의 키워드를 추가합니다.
+                 const relatedSimulations = [
+                    `${searchKeyword} 분석`,
+                    `${searchKeyword} 공략`,
+                    `${searchKeyword} 꿀팁`,
+                    `2025년 ${searchKeyword} 전망`,
+                    `초보자 ${searchKeyword} 가이드`
+                 ];
+                 // 기존 목록에 섞고 중복 제거
+                 baseKeywords = [...new Set([...relatedSimulations, ...baseKeywords])];
+            }
+
 
             const popularKeywords = baseKeywords.sort(() => 0.5 - Math.random()); // 무작위로 섞기
             
@@ -707,6 +726,9 @@
                 if (regionCode === 'US' && (keyword.includes('IT') || keyword.includes('AI'))) score *= 1.4;
                 if (timeRange === 'thisWeek' || timeRange === 'today') score *= 1.2;
                 if (timeRange === 'thisYear') score *= 0.8;
+                
+                // 검색 키워드와 관련된 경우 점수 추가 부여
+                if (searchKeyword && keyword.includes(searchKeyword)) score *= 1.8;
                 
                 trends.push({
                     rank: index + 1,
@@ -752,18 +774,26 @@
         
         /**
          * 필터 설정에 따라 트렌드 데이터를 가져와 렌더링하고 UI를 업데이트합니다.
+         * @param {string} [keyword=''] - 검색 키워드 (선택적)
          */
-        function fetchAndRenderTrends() {
+        function fetchAndRenderTrends(keyword = '') {
             const regionCode = regionCodeSelect.value;
             const dateRange = dateRangeSelect.value;
             
-            const trends = generateTrendingData(regionCode, dateRange);
-            renderTrendingKeywords(trends);
-            
-            // 필터 디스플레이 업데이트
+            // 키워드가 있으면 트렌드 섹션 제목 변경
             const regionName = REGION_NAMES[regionCode] || '전체';
             const rangeName = TIME_RANGE_NAMES[dateRange] || '전체 기간';
-            trendFilterDisplay.textContent = `(${rangeName}, ${regionName})`;
+
+            if (keyword) {
+                globalTrendTitle.textContent = `키워드 "${keyword}" 연관 트렌드 순위`;
+                trendFilterDisplay.textContent = `(${rangeName}, ${regionName} 기준)`;
+            } else {
+                globalTrendTitle.textContent = `글로벌 YouTube 트렌드 검색 순위`;
+                trendFilterDisplay.textContent = `(${rangeName}, ${regionName} 기준)`;
+            }
+            
+            const trends = generateTrendingData(regionCode, dateRange, keyword);
+            renderTrendingKeywords(trends);
         }
 
 
@@ -981,6 +1011,9 @@
                 renderSearchTrendGraph(keyword, trendRangeSelect.value);
                 // 연관 키워드 볼륨 타이틀 업데이트
                 updateRelatedKeywordVolumes(trendRangeSelect.value); 
+                
+                // --- 제목 클릭 시 초기화 기능 반영을 위해 글로벌 트렌드 업데이트 ---
+                fetchAndRenderTrends(keyword); 
 
 
                 // --- Step 1: Search API 호출 (영상 ID 목록 및 기본 메타데이터 가져오기) ---
@@ -1344,6 +1377,12 @@
         // 이벤트 리스너 등록
         // =================================================================
 
+        // 제목 클릭 시 초기화 (페이지 새로고침)
+        mainTitle.addEventListener('click', () => {
+            location.reload();
+        });
+
+
         // 1. 검색 버튼
         searchButton.addEventListener('click', runSearchAndAnalysis);
         searchKeywordInput.addEventListener('keypress', (e) => {
@@ -1364,15 +1403,17 @@
         });
         
         // 3. 글로벌 트렌드 필터 변경 (기간 및 국가)
-        dateRangeSelect.addEventListener('change', fetchAndRenderTrends);
-        regionCodeSelect.addEventListener('change', fetchAndRenderTrends);
+        dateRangeSelect.addEventListener('change', () => {
+             // 필터 변경 시 현재 키워드를 사용하여 트렌드 업데이트
+            fetchAndRenderTrends(currentKeyword);
+        });
+        regionCodeSelect.addEventListener('change', () => {
+            // 필터 변경 시 현재 키워드를 사용하여 트렌드 업데이트
+            fetchAndRenderTrends(currentKeyword);
+        });
 
 
-        // 4. 키 변경 버튼 (API 키 모달 열기) 제거됨. 
-        // 키 변경 모달은 이제 키가 없을 때만 loadApiKey에서 자동으로 호출됩니다.
-        // openModalButton.addEventListener('click', ...) 제거됨.
-
-        // 5. 모달 저장 버튼
+        // 4. 모달 저장 버튼
         saveApiKeyButton.addEventListener('click', () => {
             const key = apiKeyInput.value.trim();
             if (key.length < 20) { 
@@ -1383,7 +1424,7 @@
             saveApiKey(key);
         });
 
-        // 6. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
+        // 5. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
         resultsList.addEventListener('click', (event) => {
             // 태그 복사 버튼 처리
             const copyButton = event.target.closest('.copy-tags-btn');
@@ -1412,7 +1453,7 @@
             }
         });
         
-        // 7. 연관 키워드 버튼 처리 (이벤트 위임 사용)
+        // 6. 연관 키워드 버튼 처리 (이벤트 위임 사용)
         searchVolumeAnalysis.addEventListener('click', (event) => {
             const tagButton = event.target.closest('.tag-search-btn');
             if (tagButton) {
@@ -1424,7 +1465,7 @@
             }
         });
         
-        // 8. 글로벌 트렌드 키워드 클릭 시 검색 실행
+        // 7. 글로벌 트렌드 키워드 클릭 시 검색 실행
         youtubeTrendsDashboard.addEventListener('click', (event) => {
             const trendItem = event.target.closest('.trend-item');
             if (trendItem) {
@@ -1437,7 +1478,7 @@
         });
 
         
-        // 9. 초기화
+        // 8. 초기화
         window.addEventListener('load', initializeFirebase);
     </script>
 </body>
