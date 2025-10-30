@@ -284,7 +284,17 @@
 
         <!-- 결과 리스트 섹션 -->
         <div id="searchResultsContainer" class="hidden">
-            <h2 id="resultCountHeader" class="text-xl font-bold text-gray-800 mb-4">검색 결과 (0개)</h2>
+            <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between">
+                <span id="resultCountHeader">검색 결과 (0개)</span>
+                <!-- 제목 전체 번역 버튼 추가 -->
+                <button
+                    id="translateAllButton"
+                    class="bg-indigo-500 text-white text-sm font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-indigo-600 transition duration-150 active:scale-95 disabled:bg-gray-400 flex items-center"
+                >
+                    <svg class="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 5h12M3 9h9m-9 4h6m4 0h6m-6 0v-4m0 0h6m-6 0L14 3m0 0l-2 2m2-2v4"></path></svg>
+                    <span id="translateAllText">제목 전체 번역</span>
+                </button>
+            </h2>
             <div id="resultsList" class="space-y-4">
                 <!-- 여기에 검색 결과 카드가 삽입됩니다. -->
             </div>
@@ -372,6 +382,8 @@
         const globalTrendTitle = document.getElementById('globalTrendTitle');
         const trendFilterDisplay = document.getElementById('trendFilterDisplay');
         const initialTrendMessage = document.getElementById('initialTrendMessage');
+        const translateAllButton = document.getElementById('translateAllButton'); // 제목 전체 번역 버튼
+        const translateAllText = document.getElementById('translateAllText'); 
         
         let searchVolumeChartInstance = null; // Chart.js 인스턴스를 저장할 변수
         let currentKeyword = ''; // 현재 검색된 키워드를 저장할 변수
@@ -597,11 +609,12 @@
                         const errorMessage = errorData.error?.message || `API call failed with status: ${response.status}`;
                         lastErrorMessage = errorMessage;
                         
-                        // Check for transient errors (Overloaded, Too Many Requests, Server Error)
+                        // Check for transient errors (Overloaded, Too Many Requests, Server Error, Quota Exceeded)
                         if (response.status === 429 || 
                             response.status >= 500 || // 5xx server errors often temporary
                             errorMessage.includes("overloaded") || 
-                            errorMessage.includes("rate limit")) {
+                            errorMessage.includes("rate limit") ||
+                            errorMessage.includes("Quota exceeded")) {
 
                             // Transient error: proceed to retry
                             if (attempt < MAX_RETRIES - 1) {
@@ -986,6 +999,7 @@
             resultsList.innerHTML = '';
             searchResultsContainer.classList.add('hidden');
             searchVolumeAnalysis.classList.add('hidden');
+            translateAllButton.classList.add('hidden'); // 검색 시작 시 버튼 숨기기
 
             const keyword = searchKeywordInput.value.trim();
             currentKeyword = keyword; // 현재 키워드 저장
@@ -1195,8 +1209,12 @@
             resultsList.innerHTML = ''; // 기존 결과 지우기
             searchResultsContainer.classList.remove('hidden');
             resultCountHeader.textContent = `검색 결과 (${formatNumber(videos.length)}개)`;
-
-            if (videos.length === 0) {
+            
+            // 검색 결과가 있을 경우에만 전체 번역 버튼 표시
+            if (videos.length > 0) {
+                 translateAllButton.classList.remove('hidden');
+            } else {
+                translateAllButton.classList.add('hidden');
                 resultsList.innerHTML = '<p class="text-gray-500 p-4 bg-white rounded-lg shadow-md">적용된 필터 조건에 맞는 영상이 없습니다.</p>';
                 return;
             }
@@ -1226,13 +1244,16 @@
                     // 검색 키워드에 포함되는지 확인
                     for (const term of searchTerms) {
                         if (tagLower.includes(term)) {
-                            // 1부터 시작하는 순위 표시
-                            rankBadge = `<span class="text-xs ml-1 font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full inline-block">(순위: ${index + 1})`;
+                            // 1부터 시작하는 순위 표시 (배경색 제거, 스타일 통합)
+                            rankBadge = `<span class="ml-1 text-red-600 font-bold">(순위: ${index + 1})</span>`;
                             break; // 첫 번째 일치하는 키워드만 순위 표시
                         }
                     }
-                    // 태그에 data-tag-value 속성을 추가하고 버튼으로 변경하여 클릭 가능하게 만듭니다.
-                    return `<button class="tag-search-btn bg-gray-200 text-gray-700 text-xs font-medium px-2 py-1 rounded-md inline-block mr-2 mb-1 hover:bg-blue-300 transition duration-150 active:scale-95" data-tag-value="${tag.replace(/"/g, '&quot;')}" title="클릭하여 태그로 검색">${tag}</button>${rankBadge}`;
+                    // 태그 버튼에 순위 배지를 포함하여 렌더링합니다.
+                    return `
+                        <button class="tag-search-btn bg-gray-200 text-gray-700 text-xs font-medium px-2 py-1 rounded-md inline-flex items-center mr-2 mb-1 hover:bg-blue-300 transition duration-150 active:scale-95 whitespace-nowrap" data-tag-value="${tag.replace(/"/g, '&quot;')}" title="클릭하여 태그로 검색">
+                            ${tag}${rankBadge}
+                        </button>`;
                 }).join('');
 
                 const copyButtonHtml = video.tags.length > 0 ? `
@@ -1260,7 +1281,7 @@
                         <div class="flex-grow">
                             <!-- 제목 -->
                             <div class="flex items-center mb-1">
-                                <h3 class="text-lg font-bold text-gray-900 line-clamp-2 mr-2">
+                                <h3 id="title-${video.id}" class="video-title text-lg font-bold text-gray-900 line-clamp-2 mr-2" data-original-title="${video.title.replace(/"/g, '&quot;')}">
                                     <a href="${videoLink}" target="_blank" rel="noopener noreferrer" class="hover:text-blue-600 transition duration-150">${video.title}</a>
                                 </h3>
                                 <!-- 번역 버튼 -->
@@ -1373,6 +1394,76 @@
             button.dataset.currentType = type; // 현재 활성화된 타입 기록
         }
         
+        /**
+         * 검색 결과 목록의 모든 제목을 일괄적으로 번역합니다.
+         */
+        async function handleTranslateAllTitles() {
+            const titleElements = document.querySelectorAll('.video-title');
+            
+            if (titleElements.length === 0) {
+                messageBox.textContent = "🚨 번역할 검색 결과가 없습니다.";
+                return;
+            }
+            
+            translateAllButton.disabled = true;
+            translateAllText.innerHTML = '<div class="spinner-sm border-white border-l-transparent"></div>';
+            messageBox.textContent = ''; // Clear previous messages
+            
+            const systemPrompt = "You are a professional Korean translator. Translate the given text naturally and concisely into Korean, outputting only the translated title.";
+            
+            // **수정된 로직: 10/분 할당량 초과를 막기 위해 순차적 처리 및 지연 시간 적용**
+            const DELAY_MS = 6500; // 6.5초 지연 (60초/10회 제한 준수)
+            let successfulTranslations = 0;
+            let lastError = null;
+
+            for (let i = 0; i < titleElements.length; i++) {
+                const titleElement = titleElements[i];
+                const originalTitle = titleElement.dataset.originalTitle;
+                const userPrompt = `Translate the following YouTube video title into Korean: "${originalTitle}"`;
+                
+                // 진행 상황 표시
+                translateAllText.textContent = `번역 중... (${i + 1}/${titleElements.length})`;
+
+                const translatedTitle = await callGeminiApi(userPrompt, systemPrompt);
+                
+                // 결과 처리
+                const titleLink = titleElement.querySelector('a');
+                if (titleLink) {
+                    if (!translatedTitle.startsWith('[API 오류')) {
+                        // 성공적으로 번역되었을 때만 업데이트
+                        titleLink.textContent = translatedTitle;
+                        successfulTranslations++;
+                    } else {
+                        // API 오류 발생 시 기록 및 진행
+                        lastError = translatedTitle;
+                        console.error(`Translation failed for: ${originalTitle}. Error: ${translatedTitle}`);
+                        // 쿼터 초과 오류인 경우, 이후 요청을 중단하고 메시지 표시
+                        if (translatedTitle.includes('Quota exceeded')) {
+                            break; 
+                        }
+                    }
+                }
+                
+                // 마지막 요청이 아니면 지연 시간을 적용하여 할당량 초과를 방지
+                if (i < titleElements.length - 1 && successfulTranslations === i + 1) {
+                    await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+                }
+            }
+
+            // 최종 메시지 업데이트
+            if (successfulTranslations === titleElements.length) {
+                messageBox.textContent = `✅ ${successfulTranslations}개 제목 번역을 모두 완료했습니다.`;
+            } else if (successfulTranslations > 0) {
+                 messageBox.textContent = `⚠️ ${successfulTranslations}개 제목을 번역했습니다. 나머지 (${titleElements.length - successfulTranslations}개)는 오류 또는 할당량 초과로 인해 중단되었습니다. 잠시 후 다시 시도해 주세요.`;
+            } else {
+                 messageBox.textContent = `❌ 제목 번역에 실패했습니다. ${lastError || '알 수 없는 오류'}. API 할당량을 확인해 주세요.`;
+            }
+
+            // Restore button state
+            translateAllText.textContent = '제목 전체 번역';
+            translateAllButton.disabled = false;
+        }
+        
         // =================================================================
         // 이벤트 리스너 등록
         // =================================================================
@@ -1412,8 +1503,11 @@
             fetchAndRenderTrends(currentKeyword);
         });
 
+        // 4. 제목 전체 번역 버튼
+        translateAllButton.addEventListener('click', handleTranslateAllTitles);
 
-        // 4. 모달 저장 버튼
+
+        // 5. 모달 저장 버튼
         saveApiKeyButton.addEventListener('click', () => {
             const key = apiKeyInput.value.trim();
             if (key.length < 20) { 
@@ -1424,7 +1518,7 @@
             saveApiKey(key);
         });
 
-        // 5. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
+        // 6. 태그 복사, 번역, 요약, 태그 검색 버튼 (이벤트 위임 사용)
         resultsList.addEventListener('click', (event) => {
             // 태그 복사 버튼 처리
             const copyButton = event.target.closest('.copy-tags-btn');
@@ -1453,7 +1547,7 @@
             }
         });
         
-        // 6. 연관 키워드 버튼 처리 (이벤트 위임 사용)
+        // 7. 연관 키워드 버튼 처리 (이벤트 위임 사용)
         searchVolumeAnalysis.addEventListener('click', (event) => {
             const tagButton = event.target.closest('.tag-search-btn');
             if (tagButton) {
@@ -1465,7 +1559,7 @@
             }
         });
         
-        // 7. 글로벌 트렌드 키워드 클릭 시 검색 실행
+        // 8. 글로벌 트렌드 키워드 클릭 시 검색 실행
         youtubeTrendsDashboard.addEventListener('click', (event) => {
             const trendItem = event.target.closest('.trend-item');
             if (trendItem) {
@@ -1478,7 +1572,7 @@
         });
 
         
-        // 8. 초기화
+        // 9. 초기화
         window.addEventListener('load', initializeFirebase);
     </script>
 </body>
