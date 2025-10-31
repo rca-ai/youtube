@@ -211,6 +211,12 @@
                     <input type="number" id="minViews" placeholder="0" value="0" min="0" class="w-full p-2 border border-gray-300 rounded-lg">
                 </div>
                 
+                <!-- 최소 구독자 수 (클라이언트 필터) -->
+                <div>
+                    <label for="minSubscribers" class="block text-gray-700 font-medium mb-1">최소 구독자 수</label>
+                    <input type="number" id="minSubscribers" placeholder="0" value="0" min="0" class="w-full p-2 border border-gray-300 rounded-lg">
+                </div>
+                
                 <!-- 국가 (리전 - 이 트렌드 필터로 사용됨) -->
                 <div>
                     <label for="regionCode" class="block text-gray-700 font-medium mb-1">국가 (트렌드 기준)</label>
@@ -227,11 +233,15 @@
                     </select>
                 </div>
 
-                <!-- 태그 포함/불포함 옵션 -->
-                <div class="col-span-2 md:col-span-4 lg:col-span-6">
-                    <label class="inline-flex items-center mt-3">
+                <!-- 태그 포함/불포함 및 숏츠 제외 옵션 -->
+                <div class="col-span-2 md:col-span-4 lg:col-span-6 flex flex-wrap gap-4 mt-3">
+                    <label class="inline-flex items-center">
                         <input type="checkbox" id="tagInclusion" checked class="form-checkbox h-4 w-4 text-blue-600 rounded">
                         <span class="ml-2 text-gray-700 font-medium">검색 키워드를 영상 태그에 포함하여 검색</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="checkbox" id="excludeShorts" class="form-checkbox h-4 w-4 text-red-600 rounded">
+                        <span class="ml-2 text-gray-700 font-medium">숏츠 제외 (4분 미만)</span>
                     </label>
                 </div>
             </div>
@@ -366,9 +376,11 @@
         const videoDurationSelect = document.getElementById('videoDuration');
         const dateRangeSelect = document.getElementById('dateRange'); // 트렌드 기간 필터로도 사용
         const minViewsInput = document.getElementById('minViews');
+        const minSubscribersInput = document.getElementById('minSubscribers'); // 최소 구독자 수
         const regionCodeSelect = document.getElementById('regionCode'); // 트렌드 국가 필터로도 사용
         const tagInclusionCheckbox = document.getElementById('tagInclusion');
-
+        const excludeShortsCheckbox = document.getElementById('excludeShorts'); // 숏츠 제외
+        
         // 새로운 요소 캐시 (검색량 분석 관련)
         const searchVolumeAnalysis = document.getElementById('searchVolumeAnalysis');
         const trendRangeSelect = document.getElementById('trendRange');
@@ -431,7 +443,7 @@
             } catch (error) {
                 console.error("Firebase Initialization Error:", error);
                 // Firebase 초기화 실패 시 메시지 박스에 출력
-                messageBox.textContent = " ";
+                messageBox.textContent = "Firebase 초기화 중 오류가 발생했습니다. 키 저장이 불가능합니다.";
             }
             
             // 초기 로드 시 글로벌 트렌드 데이터 표시 (검색 키워드 없음)
@@ -450,13 +462,13 @@
                     console.log("API Key loaded successfully from Firestore.");
                 } else {
                     console.log("No stored API Key found. Using default hardcoded key.");
-                    messageBox.textContent = "ℹ️ 저장된 키가 없어 기본 API 키로 작동을 시작합니다.";
-                    // showApiKeyModal(true); // <-- 요청에 따라 제거됨
+                    // 요청에 따라 초기 경고 메시지는 표시하지 않습니다.
+                    // messageBox.textContent = "ℹ️ 저장된 키가 없어 기본 API 키로 작동을 시작합니다.";
                 }
             } catch (e) {
                 console.error("Error loading API key from Firestore:", e);
-                messageBox.textContent = "⚠️ 저장된 API 키를 불러오는 중 오류가 발생했습니다. 기본 API 키로 시작합니다.";
-                // showApiKeyModal(true); // <-- 요청에 따라 제거됨
+                // 요청에 따라 초기 경고 메시지는 표시하지 않습니다.
+                // messageBox.textContent = "⚠️ 저장된 API 키를 불러오는 중 오류가 발생했습니다. 기본 API 키로 시작합니다.";
             }
         }
 
@@ -572,7 +584,7 @@
         }
 
         // =================================================================
-        // Gemini API 로직 (번역, 요약, 연관 키워드)
+        // Gemini API 로직 (번역, 요약, 연관 키워드, 다국어 감지)
         // =================================================================
         const GEMINI_API_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=';
 
@@ -658,6 +670,28 @@
             console.error("Gemini API Error (Final):", lastErrorMessage);
             let cleanMessage = lastErrorMessage.replace(/^Error:\s*/, '');
             return `[API 오류: ${cleanMessage}]`;
+        }
+
+        /**
+         * 검색 키워드의 주요 언어를 감지합니다.
+         * @param {string} keyword - 검색 키워드
+         * @returns {string} 감지된 언어 (예: Korean, English, Chinese 등)
+         */
+        async function detectKeywordLanguage(keyword) {
+            const systemPrompt = "You are a language detection expert. Your only task is to identify the primary language of the input text. Respond with only the language name (e.g., Korean, English, Japanese). If the language is ambiguous or mixed, default to English.";
+            const userPrompt = `Identify the primary language of the following keyword: "${keyword}"`;
+            
+            try {
+                const language = await callGeminiApi(userPrompt, systemPrompt);
+                // API 오류가 발생하면 기본값으로 English를 반환
+                if (language.startsWith('[API 오류')) {
+                    return 'English';
+                }
+                return language.trim();
+            } catch (error) {
+                console.error("Language detection failed:", error);
+                return 'English';
+            }
         }
         
         // =================================================================
@@ -1005,10 +1039,11 @@
             currentKeyword = keyword; // 현재 키워드 저장
             const sortBy = sortBySelect.value;
             const maxResults = maxResultsSelect.value;
-            const videoDuration = videoDurationSelect.value;
+            const videoDurationSelectValue = videoDurationSelect.value;
             const dateRange = dateRangeSelect.value;
             const regionCode = regionCodeSelect.value;
             const minViews = parseInt(minViewsInput.value) || 0;
+            const minSubscribers = parseInt(minSubscribersInput.value) || 0; // 최소 구독자 수
 
             if (!keyword) {
                 messageBox.textContent = "🚨 검색 키워드를 입력해 주세요.";
@@ -1019,8 +1054,11 @@
             try {
                 // --- Step A: 분석 섹션 업데이트 (비동기 처리) ---
                 searchVolumeAnalysis.classList.remove('hidden');
-                // 연관 키워드 비동기 요청 시작
-                const relatedKeywordsPromise = fetchRelatedKeywords(keyword);
+                
+                // 다국어 감지 및 연관 키워드 요청 시작
+                const keywordLanguage = await detectKeywordLanguage(keyword);
+                const relatedKeywordsPromise = fetchRelatedKeywords(keyword, keywordLanguage);
+                
                 // 그래프 초기 렌더링
                 renderSearchTrendGraph(keyword, trendRangeSelect.value);
                 // 연관 키워드 볼륨 타이틀 업데이트
@@ -1033,9 +1071,38 @@
                 // --- Step 1: Search API 호출 (영상 ID 목록 및 기본 메타데이터 가져오기) ---
                 let searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&type=video&maxResults=${maxResults}&order=${sortBy}&key=${youtubeApiKey}`;
                 
-                if (videoDuration !== 'any') {
-                    searchUrl += `&videoDuration=${videoDuration}`;
+                // 숏츠 제외 옵션 처리 (API level)
+                const isShortsExcluded = excludeShortsCheckbox.checked;
+                let finalVideoDuration = videoDurationSelectValue;
+
+                if (isShortsExcluded) {
+                    // "숏츠 제외"가 체크되면, videoDuration 필터와 관계없이 짧은 영상(short)을 제외합니다.
+                    // API에서 shortDuration 옵션은 없으므로, medium과 long을 OR 검색하거나, 
+                    // Search API의 videoDuration 파라미터를 사용하여 short를 제외합니다.
+                    // Search API의 videoDuration 파라미터가 'short', 'medium', 'long'만 지원하므로,
+                    // 'short'를 제외하는 것은 API 단에서 직접적으로는 불가능하며, 'medium'과 'long'으로 한정해야 합니다.
+                    if (finalVideoDuration === 'any' || finalVideoDuration === 'short') {
+                        // 'any' 또는 'short'가 선택된 상태에서 '숏츠 제외'가 체크되면 'medium'으로 변경하여 4분 미만 제외 시도
+                        // 명시적으로 videoDuration을 medium과 long으로 한정할 수 없으므로, 
+                        // UX를 단순화하기 위해 "숏츠 제외"는 Search API의 videoDuration 파라미터를 사용하지 않습니다.
+                        // 대신, 'medium'이나 'long'으로 선택하도록 유도하는 메시지를 띄우거나,
+                        // 아니면 이 필터는 클라이언트 단에서만 처리합니다. (API 할당량 소모 증가 우려)
+                        // 여기서는 Search API의 videoDuration 파라미터는 videoDurationSelectValue로 유지하고,
+                        // 숏츠 제외는 클라이언트에서 한 번 더 처리하도록 합니다.
+                        // 다만, API의 videoDuration 필터를 활용하는 것이 할당량 면에서 효율적입니다.
+                        
+                        // "숏츠 제외"를 체크하면, videoDurationSelectValue에 관계없이 duration 필터를 4분 이상(medium, long)으로 제한하기 위해,
+                        // API 호출 시 'medium'과 'long'만 검색하도록 videoDuration 파라미터를 조정합니다.
+                        finalVideoDuration = 'medium'; // Search API에서 'medium'과 'long'을 명시적으로 OR할 방법은 없음.
+                        // YouTube API documentation suggests that videoDuration can only take one value: short, medium, or long.
+                        // To exclude shorts, we assume 'medium' setting will effectively exclude 'short' videos.
+                    }
                 }
+
+                if (finalVideoDuration !== 'any') {
+                    searchUrl += `&videoDuration=${finalVideoDuration}`;
+                }
+                
                 const publishedAfter = calculatePublishedAfter(dateRange);
                 if (publishedAfter) {
                     searchUrl += `&publishedAfter=${publishedAfter}`;
@@ -1131,13 +1198,35 @@
                         viewCount: parseInt(statistics.viewCount) || 0,
                         likeCount: parseInt(statistics.likeCount) || 0,
                         commentCount: parseInt(statistics.commentCount) || 0, // 댓글 수 추가
-                        duration: formatDuration(contentDetails.duration),
+                        duration: contentDetails.duration, // ISO 8601 원본 유지
+                        durationFormatted: formatDuration(contentDetails.duration), // 포맷된 길이
                         description: snippet.description || "영상 설명이 제공되지 않았습니다." 
                     };
                 });
                 
-                // 최소 조회수 클라이언트 필터링 적용
-                const filteredResults = finalResults.filter(video => video.viewCount >= minViews);
+                // 최소 조회수, 최소 구독자 수, 숏츠 제외 클라이언트 필터링 적용
+                let filteredResults = finalResults.filter(video => {
+                    // 1. 최소 조회수 필터링
+                    if (video.viewCount < minViews) return false;
+                    
+                    // 2. 최소 구독자 수 필터링
+                    if (video.subscriberCount < minSubscribers) return false;
+
+                    // 3. 숏츠 제외 클라이언트 필터링 (Search API duration이 완벽하지 않으므로 한 번 더 검사)
+                    if (isShortsExcluded) {
+                        // 영상 길이가 4분 (240초) 미만인지 확인
+                        const durationMatch = video.duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+                        if (durationMatch) {
+                            const hours = parseInt(durationMatch[1]) || 0;
+                            const minutes = parseInt(durationMatch[2]) || 0;
+                            const seconds = parseInt(durationMatch[3]) || 0;
+                            const totalSeconds = hours * 3600 + minutes * 60 + seconds;
+                            if (totalSeconds < 240) return false; // 4분(240초) 미만이면 제외
+                        }
+                    }
+
+                    return true;
+                });
                 
                 // --- Step 5: 결과 렌더링 ---
                 renderResults(filteredResults, keyword);
@@ -1157,11 +1246,12 @@
         /**
          * 연관 검색 키워드를 Gemini API를 통해 가져와 렌더링합니다.
          */
-        async function fetchRelatedKeywords(keyword) {
+        async function fetchRelatedKeywords(keyword, keywordLanguage) {
             relatedKeywordsLoading.classList.remove('hidden');
             relatedKeywordsList.innerHTML = '';
             
-            const systemPrompt = "You are an SEO and content strategy expert. Based on the user's primary keyword, generate a list of 20 high-value, long-tail related search queries/keywords that are relevant to YouTube video content. Respond only with a comma-separated list of the 20 keywords, with no prefix, suffix, or explanation.";
+            // 다국어 우선순위를 반영한 시스템 프롬프트
+            const systemPrompt = `You are an SEO and content strategy expert. The user's primary keyword is in ${keywordLanguage}. Generate a list of 20 high-value, long-tail related search queries/keywords that are relevant to YouTube video content. The keywords must be in ${keywordLanguage} (or English if the primary language is not suitable for search). Respond only with a comma-separated list of the 20 keywords, with no prefix, suffix, or explanation.`;
             const userPrompt = `Generate 20 related search keywords for YouTube based on the primary keyword: "${keyword}"`;
 
             try {
@@ -1250,6 +1340,7 @@
                         }
                     }
                     // 태그 버튼에 순위 배지를 포함하여 렌더링합니다.
+                    // whitespace-nowrap을 사용하여 태그와 순위가 한 버튼 안에서 줄바꿈되지 않도록 합니다.
                     return `
                         <button class="tag-search-btn bg-gray-200 text-gray-700 text-xs font-medium px-2 py-1 rounded-md inline-flex items-center mr-2 mb-1 hover:bg-blue-300 transition duration-150 active:scale-95 whitespace-nowrap" data-tag-value="${tag.replace(/"/g, '&quot;')}" title="클릭하여 태그로 검색">
                             ${tag}${rankBadge}
@@ -1274,7 +1365,7 @@
                             <a href="${videoLink}" target="_blank" rel="noopener noreferrer">
                                 <img src="${video.thumbnailUrl}" alt="${video.title}" class="w-full h-auto rounded-lg shadow-md object-cover">
                             </a>
-                            <span class="duration-overlay">${video.duration}</span>
+                            <span class="duration-overlay">${video.durationFormatted}</span>
                         </div>
 
                         <!-- 내용 (우측) -->
