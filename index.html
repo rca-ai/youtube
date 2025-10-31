@@ -241,7 +241,7 @@
                     </label>
                     <label class="inline-flex items-center">
                         <input type="checkbox" id="excludeShorts" class="form-checkbox h-4 w-4 text-red-600 rounded">
-                        <span class="ml-2 text-gray-700 font-medium">숏츠 제외 (4분 미만)</span>
+                        <span class="ml-2 text-gray-700 font-medium">숏츠 제외 (세로 영상)</span>
                     </label>
                 </div>
             </div>
@@ -1075,27 +1075,10 @@
                 const isShortsExcluded = excludeShortsCheckbox.checked;
                 let finalVideoDuration = videoDurationSelectValue;
 
+                // '숏츠 제외 (세로 영상)' 옵션이 체크된 경우, Search API의 videoDuration 파라미터를 'medium'으로 설정하여 짧은 영상이 나올 확률을 줄임.
                 if (isShortsExcluded) {
-                    // "숏츠 제외"가 체크되면, videoDuration 필터와 관계없이 짧은 영상(short)을 제외합니다.
-                    // API에서 shortDuration 옵션은 없으므로, medium과 long을 OR 검색하거나, 
-                    // Search API의 videoDuration 파라미터를 사용하여 short를 제외합니다.
-                    // Search API의 videoDuration 파라미터가 'short', 'medium', 'long'만 지원하므로,
-                    // 'short'를 제외하는 것은 API 단에서 직접적으로는 불가능하며, 'medium'과 'long'으로 한정해야 합니다.
                     if (finalVideoDuration === 'any' || finalVideoDuration === 'short') {
-                        // 'any' 또는 'short'가 선택된 상태에서 '숏츠 제외'가 체크되면 'medium'으로 변경하여 4분 미만 제외 시도
-                        // 명시적으로 videoDuration을 medium과 long으로 한정할 수 없으므로, 
-                        // UX를 단순화하기 위해 "숏츠 제외"는 Search API의 videoDuration 파라미터를 사용하지 않습니다.
-                        // 대신, 'medium'이나 'long'으로 선택하도록 유도하는 메시지를 띄우거나,
-                        // 아니면 이 필터는 클라이언트 단에서만 처리합니다. (API 할당량 소모 증가 우려)
-                        // 여기서는 Search API의 videoDuration 파라미터는 videoDurationSelectValue로 유지하고,
-                        // 숏츠 제외는 클라이언트에서 한 번 더 처리하도록 합니다.
-                        // 다만, API의 videoDuration 필터를 활용하는 것이 할당량 면에서 효율적입니다.
-                        
-                        // "숏츠 제외"를 체크하면, videoDurationSelectValue에 관계없이 duration 필터를 4분 이상(medium, long)으로 제한하기 위해,
-                        // API 호출 시 'medium'과 'long'만 검색하도록 videoDuration 파라미터를 조정합니다.
-                        finalVideoDuration = 'medium'; // Search API에서 'medium'과 'long'을 명시적으로 OR할 방법은 없음.
-                        // YouTube API documentation suggests that videoDuration can only take one value: short, medium, or long.
-                        // To exclude shorts, we assume 'medium' setting will effectively exclude 'short' videos.
+                        finalVideoDuration = 'medium'; 
                     }
                 }
 
@@ -1140,7 +1123,7 @@
                     return;
                 }
 
-                // --- Step 2: Videos API 호출 (조회수, 좋아요 수, 길이, 상세 태그, 댓글 수 가져오기) ---
+                // --- Step 2: Videos API 호출 (조회수, 좋아요 수, 길이, 상세 태그, 댓글 수, 썸네일 정보 가져오기) ---
                 const videoIdsString = videoIds.join(',');
                 const videosUrl = `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id=${videoIdsString}&key=${youtubeApiKey}`;
 
@@ -1185,6 +1168,10 @@
                     const channelId = snippet.channelId;
                     const stats = channelStats[channelId] || {};
 
+                    // 썸네일 정보 추출 (숏츠 필터링을 위해 width/height 필요)
+                    const thumbnailMedium = snippet.thumbnails?.medium || { url: '', width: 320, height: 180 };
+
+
                     return {
                         id: video.id,
                         title: snippet.title,
@@ -1194,7 +1181,9 @@
                         subscriberCount: stats.subscribers || 0,
                         channelCountry: stats.country || 'N/A', // 국가 정보 추가
                         tags: snippet.tags || [],
-                        thumbnailUrl: snippet.thumbnails?.medium?.url || '',
+                        thumbnailUrl: thumbnailMedium.url,
+                        thumbnailWidth: thumbnailMedium.width,
+                        thumbnailHeight: thumbnailMedium.height,
                         viewCount: parseInt(statistics.viewCount) || 0,
                         likeCount: parseInt(statistics.likeCount) || 0,
                         commentCount: parseInt(statistics.commentCount) || 0, // 댓글 수 추가
@@ -1212,16 +1201,11 @@
                     // 2. 최소 구독자 수 필터링
                     if (video.subscriberCount < minSubscribers) return false;
 
-                    // 3. 숏츠 제외 클라이언트 필터링 (Search API duration이 완벽하지 않으므로 한 번 더 검사)
+                    // 3. 숏츠 제외 (세로 영상) 클라이언트 필터링
                     if (isShortsExcluded) {
-                        // 영상 길이가 4분 (240초) 미만인지 확인
-                        const durationMatch = video.duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-                        if (durationMatch) {
-                            const hours = parseInt(durationMatch[1]) || 0;
-                            const minutes = parseInt(durationMatch[2]) || 0;
-                            const seconds = parseInt(durationMatch[3]) || 0;
-                            const totalSeconds = hours * 3600 + minutes * 60 + seconds;
-                            if (totalSeconds < 240) return false; // 4분(240초) 미만이면 제외
+                        // 썸네일 너비가 높이보다 작으면 (가로/세로 비율이 1보다 작으면) 세로 영상으로 간주
+                        if (video.thumbnailWidth && video.thumbnailHeight && video.thumbnailWidth < video.thumbnailHeight) {
+                            return false; // 숏츠(세로 영상) 제외
                         }
                     }
 
