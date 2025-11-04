@@ -240,14 +240,18 @@
                         <span class="ml-2 text-gray-700 font-medium">검색 키워드를 영상 태그에 포함하여 검색</span>
                     </label>
                     <label class="inline-flex items-center">
-                        <input type="checkbox" id="excludeShorts" class="form-checkbox h-4 w-4 text-red-600 rounded">
+                        <input type="checkbox" id="excludeShorts" checked class="form-checkbox h-4 w-4 text-red-600 rounded">
                         <span class="ml-2 text-gray-700 font-medium">숏츠 제외 (세로 영상)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="checkbox" id="searchLanguageOnly" class="form-checkbox h-4 w-4 text-green-600 rounded">
+                        <span class="ml-2 text-gray-700 font-medium">해당 언어만 검색</span>
                     </label>
                 </div>
             </div>
         </div>
 
-        <!-- 글로벌 YouTube 트렌드 분석 섹션 (초기 화면부터 표시) -->
+        <!-- 글로벌 YouTube 트렌드 분석 섹션 (초기 화면에만 표시) -->
         <div id="youtubeTrendsDashboard" class="bg-white p-6 rounded-xl shadow-lg mb-8">
             <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between">
                 <span id="globalTrendTitle">글로벌 YouTube 트렌드 검색 순위</span>
@@ -380,6 +384,7 @@
         const regionCodeSelect = document.getElementById('regionCode'); // 트렌드 국가 필터로도 사용
         const tagInclusionCheckbox = document.getElementById('tagInclusion');
         const excludeShortsCheckbox = document.getElementById('excludeShorts'); // 숏츠 제외
+        const searchLanguageOnlyCheckbox = document.getElementById('searchLanguageOnly'); // 해당 언어만 검색
         
         // 새로운 요소 캐시 (검색량 분석 관련)
         const searchVolumeAnalysis = document.getElementById('searchVolumeAnalysis');
@@ -462,13 +467,11 @@
                     console.log("API Key loaded successfully from Firestore.");
                 } else {
                     console.log("No stored API Key found. Using default hardcoded key.");
-                    // 요청에 따라 초기 경고 메시지는 표시하지 않습니다.
-                    // messageBox.textContent = "ℹ️ 저장된 키가 없어 기본 API 키로 작동을 시작합니다.";
+                    // 초기 경고 메시지는 표시하지 않습니다.
                 }
             } catch (e) {
                 console.error("Error loading API key from Firestore:", e);
-                // 요청에 따라 초기 경고 메시지는 표시하지 않습니다.
-                // messageBox.textContent = "⚠️ 저장된 API 키를 불러오는 중 오류가 발생했습니다. 기본 API 키로 시작합니다.";
+                // 초기 경고 메시지는 표시하지 않습니다.
             }
         }
 
@@ -675,7 +678,7 @@
         /**
          * 검색 키워드의 주요 언어를 감지합니다.
          * @param {string} keyword - 검색 키워드
-         * @returns {string} 감지된 언어 (예: Korean, English, Chinese 등)
+         * @returns {Promise<string>} 감지된 언어 (예: Korean, English, Chinese 등)
          */
         async function detectKeywordLanguage(keyword) {
             const systemPrompt = "You are a language detection expert. Your only task is to identify the primary language of the input text. Respond with only the language name (e.g., Korean, English, Japanese). If the language is ambiguous or mixed, default to English.";
@@ -1033,6 +1036,7 @@
             resultsList.innerHTML = '';
             searchResultsContainer.classList.add('hidden');
             searchVolumeAnalysis.classList.add('hidden');
+            youtubeTrendsDashboard.classList.add('hidden'); // 키워드 검색 시 트렌드 섹션 숨김
             translateAllButton.classList.add('hidden'); // 검색 시작 시 버튼 숨기기
 
             const keyword = searchKeywordInput.value.trim();
@@ -1044,6 +1048,7 @@
             const regionCode = regionCodeSelect.value;
             const minViews = parseInt(minViewsInput.value) || 0;
             const minSubscribers = parseInt(minSubscribersInput.value) || 0; // 최소 구독자 수
+            const isSearchLanguageOnly = searchLanguageOnlyCheckbox.checked;
 
             if (!keyword) {
                 messageBox.textContent = "🚨 검색 키워드를 입력해 주세요.";
@@ -1090,9 +1095,27 @@
                 if (publishedAfter) {
                     searchUrl += `&publishedAfter=${publishedAfter}`;
                 }
+                
+                // '해당 언어만 검색' 옵션 처리
+                if (isSearchLanguageOnly) {
+                    // Gemini가 감지한 언어 (English, Korean 등)를 YouTube API의 언어 코드(en, ko 등)로 변환
+                    // YouTube API는 BCP-47 포맷을 사용하지만, Gemini의 출력은 일반적으로 언어 이름입니다.
+                    // 간단한 변환을 위해 언어 이름의 처음 두 글자를 소문자로 사용하거나, 주요 언어만 매핑합니다.
+                    const langCodeMap = {
+                        'Korean': 'ko', 'English': 'en', 'Japanese': 'ja', 'Chinese': 'zh',
+                        'Vietnamese': 'vi', 'Thai': 'th', 'German': 'de', 'Spanish': 'es',
+                        'French': 'fr'
+                    };
+                    const langCode = langCodeMap[keywordLanguage] || keywordLanguage.toLowerCase().substring(0, 2);
+                    
+                    searchUrl += `&relevanceLanguage=${langCode}`;
+                }
+                
+                // 지역 코드 (언어 검색과 무관하게 적용)
                 if (regionCode) {
                     searchUrl += `&regionCode=${regionCode}`;
                 }
+
 
                 const searchResponse = await fetch(searchUrl);
                 const searchData = await searchResponse.json();
