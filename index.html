@@ -186,7 +186,7 @@
                 <div>
                     <label for="videoDuration" class="block text-gray-700 font-medium mb-1">영상 길이</label>
                     <select id="videoDuration" class="w-full p-2 border border-gray-300 rounded-lg">
-                        <option value="any">전체 (기본)</option>
+                        <option value="any" selected>전체 (기본)</option>
                         <option value="short">숏츠 (4분 미만)</option>
                         <option value="medium">4분 ~ 20분</option>
                         <option value="long">20분 이상</option>
@@ -197,7 +197,7 @@
                 <div>
                     <label for="dateRange" class="block text-gray-700 font-medium mb-1">기간 (트렌드 기준)</label>
                     <select id="dateRange" class="w-full p-2 border border-gray-300 rounded-lg">
-                        <option value="all">전체 (기본)</option>
+                        <option value="all" selected>전체 (기본)</option>
                         <option value="today">오늘</option>
                         <option value="thisWeek">이번 주</option>
                         <option value="thisMonth">이번 달</option>
@@ -1080,14 +1080,11 @@
                 const isShortsExcluded = excludeShortsCheckbox.checked;
                 let finalVideoDuration = videoDurationSelectValue;
 
-                // '숏츠 제외 (세로 영상)' 옵션이 체크된 경우, Search API의 videoDuration 파라미터를 'medium'으로 설정하여 짧은 영상이 나올 확률을 줄임.
+                // '숏츠 제외 (세로 영상)' 옵션이 켜져 있고, 사용자가 '전체' 또는 '숏츠'를 선택했다면 API 수준에서 'medium' 이상 검색을 유도하여 효율성을 높임
                 if (isShortsExcluded) {
-                    if (finalVideoDuration === 'any' || finalVideoDuration === 'short') {
-                        finalVideoDuration = 'medium'; 
-                    }
-                }
-
-                if (finalVideoDuration !== 'any') {
+                    // API 호출 시 videoDuration 파라미터를 사용하지 않고, 오직 클라이언트 측 필터링에만 의존하도록 수정 (이전의 버그 원인)
+                } else if (finalVideoDuration !== 'any') {
+                    // 숏츠 제외를 하지 않았고, 특정 영상 길이를 선택한 경우에만 API 파라미터 적용
                     searchUrl += `&videoDuration=${finalVideoDuration}`;
                 }
                 
@@ -1099,8 +1096,6 @@
                 // '해당 언어만 검색' 옵션 처리
                 if (isSearchLanguageOnly) {
                     // Gemini가 감지한 언어 (English, Korean 등)를 YouTube API의 언어 코드(en, ko 등)로 변환
-                    // YouTube API는 BCP-47 포맷을 사용하지만, Gemini의 출력은 일반적으로 언어 이름입니다.
-                    // 간단한 변환을 위해 언어 이름의 처음 두 글자를 소문자로 사용하거나, 주요 언어만 매핑합니다.
                     const langCodeMap = {
                         'Korean': 'ko', 'English': 'en', 'Japanese': 'ja', 'Chinese': 'zh',
                         'Vietnamese': 'vi', 'Thai': 'th', 'German': 'de', 'Spanish': 'es',
@@ -1184,6 +1179,9 @@
                 }
                 
                 // --- Step 4: 데이터 통합 및 클라이언트 필터링 ---
+                let initialResultCount = videosData.items.length;
+                let filteredCount = 0;
+                
                 let finalResults = videosData.items.map(video => {
                     const snippet = video.snippet || {};
                     const statistics = video.statistics || {};
@@ -1216,7 +1214,7 @@
                     };
                 });
                 
-                // 최소 조회수, 최소 구독자 수, 숏츠 제외 클라이언트 필터링 적용
+                // 클라이언트 필터링 적용
                 let filteredResults = finalResults.filter(video => {
                     // 1. 최소 조회수 필터링
                     if (video.viewCount < minViews) return false;
@@ -1235,6 +1233,12 @@
                     return true;
                 });
                 
+                filteredCount = filteredResults.length;
+
+                if (filteredCount === 0 && initialResultCount > 0) {
+                     messageBox.textContent = `⚠️ 검색된 영상 ${initialResultCount}개가 있었으나, 설정된 필터 조건(최소 조회수: ${formatNumber(minViews)}회, 최소 구독자: ${formatNumber(minSubscribers)}명, 숏츠 제외)으로 인해 모두 제외되었습니다. 필터를 조정해 주세요.`;
+                }
+
                 // --- Step 5: 결과 렌더링 ---
                 renderResults(filteredResults, keyword);
 
