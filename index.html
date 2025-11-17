@@ -193,9 +193,9 @@
                     </select>
                 </div>
 
-                <!-- 기간 (이 트렌드 필터로 사용됨) -->
+                <!-- 기간 (검색 기준) -->
                 <div>
-                    <label for="dateRange" class="block text-gray-700 font-medium mb-1">기간 (트렌드 기준)</label>
+                    <label for="dateRange" class="block text-gray-700 font-medium mb-1">기간 (검색 기준)</label>
                     <select id="dateRange" class="w-full p-2 border border-gray-300 rounded-lg">
                         <option value="all" selected>전체 (기본)</option>
                         <option value="today">오늘</option>
@@ -217,9 +217,9 @@
                     <input type="number" id="minSubscribers" placeholder="0" value="0" min="0" class="w-full p-2 border border-gray-300 rounded-lg">
                 </div>
                 
-                <!-- 국가 (리전 - 이 트렌드 필터로 사용됨) -->
+                <!-- 국가 (검색 기준) -->
                 <div>
-                    <label for="regionCode" class="block text-gray-700 font-medium mb-1">국가 (트렌드 기준)</label>
+                    <label for="regionCode" class="block text-gray-700 font-medium mb-1">국가 (검색 기준)</label>
                     <select id="regionCode" class="w-full p-2 border border-gray-300 rounded-lg">
                         <option value="">전체 (기본)</option>
                         <option value="KR">대한민국</option>
@@ -255,8 +255,52 @@
         <div id="youtubeTrendsDashboard" class="bg-white p-6 rounded-xl shadow-lg mb-8">
             <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between">
                 <span id="globalTrendTitle">글로벌 YouTube 트렌드 검색 순위</span>
-                <span id="trendFilterDisplay" class="text-sm font-medium text-blue-600">(전체 기간, 글로벌)</span>
+                <span id="trendFilterDisplay" class="text-sm font-medium text-blue-600">(전체 기간, 글로벌, 전체 카테고리 기준)</span>
             </h2>
+            
+            <!-- 트렌드 독립 필터 컨트롤 -->
+            <div id="trendFilterControls" class="flex flex-wrap gap-4 mb-6 p-4 border border-gray-200 rounded-lg bg-gray-50 text-sm">
+                <!-- 기간 (트렌드 전용) -->
+                <div>
+                    <label for="trendDateRange" class="block text-gray-700 font-medium mb-1">트렌드 기간</label>
+                    <select id="trendDateRange" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="all">전체 기간</option>
+                        <option value="today">오늘</option>
+                        <option value="thisWeek" selected>이번 주</option>
+                        <option value="thisMonth">이번 달</option>
+                        <option value="thisYear">이번 년</option>
+                    </select>
+                </div>
+                <!-- 국가 (트렌드 전용) -->
+                <div>
+                    <label for="trendRegionCode" class="block text-gray-700 font-medium mb-1">트렌드 국가</label>
+                    <select id="trendRegionCode" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="" selected>글로벌 (전체)</option>
+                        <option value="KR">대한민국</option>
+                        <option value="US">미국</option>
+                        <option value="JP">일본</option>
+                        <option value="GB">영국</option>
+                        <option value="DE">독일</option>
+                        <option value="TH">태국</option>
+                    </select>
+                </div>
+                <!-- 카테고리 (트렌드 전용, Google Trends 참조) -->
+                <div>
+                    <label for="trendCategory" class="block text-gray-700 font-medium mb-1">트렌드 카테고리</label>
+                    <select id="trendCategory" class="w-full p-2 border border-gray-300 rounded-lg">
+                        <option value="all" selected>전체 카테고리</option>
+                        <option value="1">영화</option>
+                        <option value="10">음악</option>
+                        <option value="15">애완동물/동물</option>
+                        <option value="20">게임</option>
+                        <option value="22">블로그/인물</option>
+                        <option value="24">엔터테인먼트</option>
+                        <option value="27">교육</option>
+                        <option value="28">과학/기술</option>
+                    </select>
+                </div>
+            </div>
+            
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" id="trendingResultsContainer">
                 <div class="md:col-span-3 text-center text-gray-500" id="initialTrendMessage">
                     필터를 선택하면 해당 기준의 트렌드 순위 (시뮬레이션)가 표시됩니다.
@@ -374,14 +418,14 @@
         const searchResultsContainer = document.getElementById('searchResultsContainer');
         const resultCountHeader = document.getElementById('resultCountHeader');
         
-        // 필터 요소 캐시
+        // 필터 요소 캐시 (메인 검색용)
         const sortBySelect = document.getElementById('sortBy');
         const maxResultsSelect = document.getElementById('maxResults');
-        const videoDurationSelect = document.getElementById('videoDuration');
-        const dateRangeSelect = document.getElementById('dateRange'); // 트렌드 기간 필터로도 사용
+        const videoDurationSelect = document.getElementById('videoDuration'); // 영상 길이 (검색용)
+        const dateRangeSelect = document.getElementById('dateRange'); // 기간 (검색용)
         const minViewsInput = document.getElementById('minViews');
         const minSubscribersInput = document.getElementById('minSubscribers'); // 최소 구독자 수
-        const regionCodeSelect = document.getElementById('regionCode'); // 트렌드 국가 필터로도 사용
+        const regionCodeSelect = document.getElementById('regionCode'); // 국가 (검색용)
         const tagInclusionCheckbox = document.getElementById('tagInclusion');
         const excludeShortsCheckbox = document.getElementById('excludeShorts'); // 숏츠 제외
         const searchLanguageOnlyCheckbox = document.getElementById('searchLanguageOnly'); // 해당 언어만 검색
@@ -402,13 +446,40 @@
         const translateAllButton = document.getElementById('translateAllButton'); // 제목 전체 번역 버튼
         const translateAllText = document.getElementById('translateAllText'); 
         
+        // 트렌드 전용 필터 캐시 (새로 추가)
+        const trendDateRangeSelect = document.getElementById('trendDateRange');
+        const trendRegionCodeSelect = document.getElementById('trendRegionCode');
+        const trendCategorySelect = document.getElementById('trendCategory');
+        
         let searchVolumeChartInstance = null; // Chart.js 인스턴스를 저장할 변수
         let currentKeyword = ''; // 현재 검색된 키워드를 저장할 변수
         
         // =================================================================
-        // 국가 코드 매핑은 2자리 코드 사용을 위해 제거되었습니다.
+        // 상수 및 매핑
         // =================================================================
 
+        const REGION_NAMES = {
+            'KR': '대한민국', 'US': '미국', 'JP': '일본', 'GB': '영국', 'DE': '독일', 
+            'CN': '중국', 'VN': '베트남', 'TH': '태국', '': '글로벌'
+        };
+        
+        const TIME_RANGE_NAMES = {
+            'today': '오늘', 'thisWeek': '이번 주', 'thisMonth': '이번 달', 
+            'thisYear': '이번 년', 'all': '전체 기간'
+        };
+        
+        // Google Trends URL의 카테고리 ID를 참조하여 YouTube 검색에 적합하게 조정
+        const CATEGORY_MAP = {
+            'all': '전체 카테고리',
+            '1': '영화',
+            '10': '음악',
+            '15': '애완동물/동물',
+            '20': '게임',
+            '22': '블로그/인물',
+            '24': '엔터테인먼트',
+            '27': '교육',
+            '28': '과학/기술',
+        };
 
         // =================================================================
         // Firebase 및 API Key 관리 로직 (기존 유지)
@@ -463,15 +534,13 @@
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     youtubeApiKey = data.key; // Load from Firestore if exists
-                    messageBox.textContent = "✅ 저장된 API 키를 사용하여 앱을 로드했습니다.";
+                    // messageBox.textContent = "✅ 저장된 API 키를 사용하여 앱을 로드했습니다."; // 경고 문구 삭제
                     console.log("API Key loaded successfully from Firestore.");
                 } else {
                     console.log("No stored API Key found. Using default hardcoded key.");
-                    // 초기 경고 메시지는 표시하지 않습니다.
                 }
             } catch (e) {
                 console.error("Error loading API key from Firestore:", e);
-                // 초기 경고 메시지는 표시하지 않습니다.
             }
         }
 
@@ -545,6 +614,21 @@
                 return `${minutes}:${pad(seconds)}`;
             }
         }
+        
+        /**
+         * ISO 8601 Duration 문자열을 초(seconds)로 변환합니다. (클라이언트 필터링용)
+         */
+        function durationToSeconds(iso8601) {
+            if (!iso8601) return 0;
+            const match = iso8601.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
+            if (!match) return 0;
+
+            const hours = parseInt(match[1]) || 0;
+            const minutes = parseInt(match[2]) || 0;
+            const seconds = parseInt(match[3]) || 0;
+            return (hours * 3600) + (minutes * 60) + seconds;
+        }
+
 
         /**
          * 선택된 기간에 따라 ISO 8601 형식의 'publishedAfter' 날짜를 계산합니다.
@@ -582,7 +666,6 @@
          */
         function setUIState(isLoading) {
             searchButton.disabled = isLoading;
-            // openModalButton.disabled = isLoading; // API 키 변경 버튼 제거로 인해 주석 처리
             loadingIndicator.classList.toggle('hidden', !isLoading);
         }
 
@@ -700,17 +783,6 @@
         // =================================================================
         // 트렌드 검색 순위 로직 (시뮬레이션)
         // =================================================================
-        
-        // 국가 이름 매핑 (트렌드 표시용)
-        const REGION_NAMES = {
-            'KR': '대한민국', 'US': '미국', 'JP': '일본', 'GB': '영국', 'DE': '독일', 
-            'CN': '중국', 'VN': '베트남', 'TH': '태국', '': '글로벌'
-        };
-        
-        const TIME_RANGE_NAMES = {
-            'today': '오늘', 'thisWeek': '이번 주', 'thisMonth': '이번 달', 
-            'thisYear': '이번 년', 'all': '전체 기간'
-        };
 
         /**
          * 임의의 단일 검색량 값을 생성합니다. (시뮬레이션)
@@ -734,20 +806,22 @@
         }
         
         /**
-         * 선택된 기간과 국가를 기반으로 Gemini API를 호출하여 트렌드 키워드를 생성합니다.
+         * 선택된 기간과 국가, 카테고리를 기반으로 Gemini API를 호출하여 트렌드 키워드를 생성합니다.
          * @param {string} regionCode - 국가 코드
          * @param {string} timeRange - 시간 범위
+         * @param {string} categoryCode - 카테고리 코드
          * @param {string} searchKeyword - 검색 키워드 (연관성 부여용)
          */
-        async function fetchTrendingKeywords(regionCode, timeRange, searchKeyword = '') {
+        async function fetchTrendingKeywords(regionCode, timeRange, categoryCode, searchKeyword = '') {
             const regionName = REGION_NAMES[regionCode] || 'Global';
             const rangeName = TIME_RANGE_NAMES[timeRange] || 'All Time';
+            const categoryName = CATEGORY_MAP[categoryCode] || 'General Topics';
             
             const keywordContext = searchKeyword ? `related to the topic of "${searchKeyword}"` : 'general popular topics';
 
-            const systemPrompt = "You are a YouTube trend prediction expert. Based on the given region and time, generate a list of 20 realistic and currently trending YouTube search keywords. The output must be only a comma-separated list of keywords, with no prefix, suffix, or explanation.";
+            const systemPrompt = "You are a YouTube trend prediction expert. Based on the given region, time, and category, generate a list of 20 realistic and currently trending YouTube search keywords. The output must be only a comma-separated list of keywords, with no prefix, suffix, or explanation.";
             
-            const userPrompt = `Generate 20 currently trending YouTube keywords for the region: "${regionName}" and the time range: "${rangeName}", focusing on ${keywordContext}.`;
+            const userPrompt = `Generate 20 currently trending YouTube keywords for the region: "${regionName}", time range: "${rangeName}", and category: "${categoryName}", focusing on ${keywordContext}.`;
 
             try {
                 // 로딩 시작
@@ -822,23 +896,26 @@
          * @param {string} [keyword=''] - 검색 키워드 (선택적)
          */
         async function fetchAndRenderTrends(keyword = '') {
-            const regionCode = regionCodeSelect.value;
-            const dateRange = dateRangeSelect.value;
+            // 트렌드 전용 필터에서 값 읽기
+            const regionCode = trendRegionCodeSelect.value;
+            const dateRange = trendDateRangeSelect.value;
+            const categoryCode = trendCategorySelect.value;
             
             // UI 타이틀 업데이트
             const regionName = REGION_NAMES[regionCode] || '전체';
             const rangeName = TIME_RANGE_NAMES[dateRange] || '전체 기간';
+            const categoryName = CATEGORY_MAP[categoryCode] || '전체 카테고리';
 
             if (keyword) {
                 globalTrendTitle.textContent = `키워드 "${keyword}" 연관 트렌드 순위`;
-                trendFilterDisplay.textContent = `(${rangeName}, ${regionName} 기준)`;
             } else {
                 globalTrendTitle.textContent = `글로벌 YouTube 트렌드 검색 순위`;
-                trendFilterDisplay.textContent = `(${rangeName}, ${regionName} 기준)`;
             }
+            // 필터 디스플레이 업데이트
+            trendFilterDisplay.textContent = `(${rangeName}, ${regionName}, ${categoryName} 기준)`;
             
             // 동적 트렌드 키워드 가져오기
-            const trends = await fetchTrendingKeywords(regionCode, dateRange, keyword);
+            const trends = await fetchTrendingKeywords(regionCode, dateRange, categoryCode, keyword);
             renderTrendingKeywords(trends);
         }
 
@@ -1078,7 +1155,8 @@
                 let finalVideoDuration = videoDurationSelectValue;
 
                 // 숏츠 제외를 하지 않았고, 특정 영상 길이를 선택한 경우에만 API 파라미터 적용
-                if (!isShortsExcluded && finalVideoDuration !== 'any') {
+                // 여기서 duration 파라미터를 추가하면, API가 1차적으로 걸러주어 효율적입니다.
+                if (finalVideoDuration !== 'any') {
                     searchUrl += `&videoDuration=${finalVideoDuration}`;
                 }
                 
@@ -1217,11 +1295,19 @@
                     if (video.subscriberCount < minSubscribers) return false;
 
                     // 3. 숏츠 제외 (세로 영상) 클라이언트 필터링
+                    const durationSeconds = durationToSeconds(video.duration);
                     if (isShortsExcluded) {
                         // 썸네일 너비가 높이보다 작으면 (가로/세로 비율이 1보다 작으면) 세로 영상으로 간주
                         if (video.thumbnailWidth && video.thumbnailHeight && video.thumbnailWidth < video.thumbnailHeight) {
                             return false; // 숏츠(세로 영상) 제외
                         }
+                    }
+
+                    // 4. 영상 길이 필터링 (Client-side enforcement, API 필터링 보강)
+                    if (videoDurationSelectValue !== 'any') {
+                        if (videoDurationSelectValue === 'short' && durationSeconds >= 240) return false; // >= 4 min
+                        if (videoDurationSelectValue === 'medium' && (durationSeconds < 240 || durationSeconds >= 1200)) return false; // < 4 min OR >= 20 min
+                        if (videoDurationSelectValue === 'long' && durationSeconds < 1200) return false; // < 20 min
                     }
 
                     return true;
@@ -1589,15 +1675,12 @@
             }
         });
         
-        // 3. 글로벌 트렌드 필터 변경 (기간 및 국가)
-        dateRangeSelect.addEventListener('change', () => {
-             // 필터 변경 시 현재 키워드를 사용하여 트렌드 업데이트
-            fetchAndRenderTrends(currentKeyword);
-        });
-        regionCodeSelect.addEventListener('change', () => {
-            // 필터 변경 시 현재 키워드를 사용하여 트렌드 업데이트
-            fetchAndRenderTrends(currentKeyword);
-        });
+        // 3. 트렌드 전용 필터 변경 시 트렌드 순위 업데이트
+        const updateTrendHandler = () => fetchAndRenderTrends(currentKeyword);
+
+        trendDateRangeSelect.addEventListener('change', updateTrendHandler);
+        trendRegionCodeSelect.addEventListener('change', updateTrendHandler);
+        trendCategorySelect.addEventListener('change', updateTrendHandler);
 
         // 4. 제목 전체 번역 버튼
         translateAllButton.addEventListener('click', handleTranslateAllTitles);
