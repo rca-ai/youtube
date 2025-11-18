@@ -603,9 +603,12 @@
             if (minutes > 0 || hours > 0) parts.push(`${minutes}m`); // 시간이 있으면 분도 항상 표시
             parts.push(`${seconds}s`);
 
-            // 시간이 0이고 분이 0일 경우, "0s" 대신 "0m 0s"와 같이 표시하도록 조정
+            // 시간이 0이고 분이 0일 경우, "0m 0s"와 같이 표시하도록 조정
             if (hours === 0 && minutes === 0 && seconds === 0) return '0m 0s';
+            // 시간이 0이고 분이 0이 아닐 경우 (예: 15s)
             if (hours === 0 && minutes === 0) return `${seconds}s`;
+            // 시간이 0이고 분이 있을 경우 (예: 5m 15s)
+            if (hours === 0) return parts.slice(1).join(' ');
 
             return parts.join(' ');
         }
@@ -1285,8 +1288,8 @@
                     // 2. 최소 구독자 수 필터링
                     if (video.subscriberCount < minSubscribers) return false;
 
-                    // 3. 업로드 국가 필터링 (멀티 국가)
-                    if (uploadCountryCodes.length > 0) {
+                    // 3. 업로드 국가 필터링 (멀티 국가) - 공백일 경우 전체 대상 검색 (수정 로직 반영)
+                    if (uploadCountryCodes.length > 0) { 
                         const videoCountry = video.channelCountry;
                         if (videoCountry === 'N/A' || !uploadCountryCodes.includes(videoCountry)) {
                             return false;
