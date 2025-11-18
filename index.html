@@ -217,20 +217,10 @@
                     <input type="number" id="minSubscribers" placeholder="0" value="0" min="0" class="w-full p-2 border border-gray-300 rounded-lg">
                 </div>
                 
-                <!-- 국가 (검색 기준) -->
+                <!-- 업로드 국가 (멀티 선택) -->
                 <div>
-                    <label for="regionCode" class="block text-gray-700 font-medium mb-1">국가 (검색 기준)</label>
-                    <select id="regionCode" class="w-full p-2 border border-gray-300 rounded-lg">
-                        <option value="">전체 (기본)</option>
-                        <option value="KR">대한민국</option>
-                        <option value="US">미국</option>
-                        <option value="JP">일본</option>
-                        <option value="GB">영국</option>
-                        <option value="DE">독일</option>
-                        <option value="CN">중국</option>
-                        <option value="VN">베트남</option>
-                        <option value="TH">태국</option>
-                    </select>
+                    <label for="uploadCountryInput" class="block text-gray-700 font-medium mb-1">업로드 국가 (KR,US,...)</label>
+                    <input type="text" id="uploadCountryInput" placeholder="KR,US,JP" class="w-full p-2 border border-gray-300 rounded-lg">
                 </div>
 
                 <!-- 태그 포함/불포함 및 숏츠 제외 옵션 -->
@@ -255,7 +245,7 @@
         <div id="youtubeTrendsDashboard" class="bg-white p-6 rounded-xl shadow-lg mb-8">
             <h2 class="text-xl font-bold text-gray-800 mb-4 flex items-center justify-between">
                 <span id="globalTrendTitle">글로벌 YouTube 트렌드 검색 순위</span>
-                <span id="trendFilterDisplay" class="text-sm font-medium text-blue-600">(전체 기간, 글로벌, 전체 카테고리 기준)</span>
+                <span id="trendFilterDisplay" class="text-sm font-medium text-blue-600">(이번 주, 글로벌, 전체 카테고리 기준)</span>
             </h2>
             
             <!-- 트렌드 독립 필터 컨트롤 -->
@@ -282,6 +272,8 @@
                         <option value="GB">영국</option>
                         <option value="DE">독일</option>
                         <option value="TH">태국</option>
+                        <option value="CN">중국</option>
+                        <option value="VN">베트남</option>
                     </select>
                 </div>
                 <!-- 카테고리 (트렌드 전용, Google Trends 참조) -->
@@ -295,6 +287,7 @@
                         <option value="20">게임</option>
                         <option value="22">블로그/인물</option>
                         <option value="24">엔터테인먼트</option>
+                        <option value="25">뉴스 & 정치</option> <!-- 뉴스 카테고리 추가 -->
                         <option value="27">교육</option>
                         <option value="28">과학/기술</option>
                     </select>
@@ -405,7 +398,6 @@
         const mainTitle = document.getElementById('mainTitle');
         const searchKeywordInput = document.getElementById('searchKeyword');
         const searchButton = document.getElementById('searchButton');
-        // const openModalButton = document.getElementById('openModalButton'); // API 키 변경 버튼 제거됨
         const messageBox = document.getElementById('messageBox');
         const loadingIndicator = document.getElementById('loadingIndicator');
 
@@ -425,7 +417,7 @@
         const dateRangeSelect = document.getElementById('dateRange'); // 기간 (검색용)
         const minViewsInput = document.getElementById('minViews');
         const minSubscribersInput = document.getElementById('minSubscribers'); // 최소 구독자 수
-        const regionCodeSelect = document.getElementById('regionCode'); // 국가 (검색용)
+        const uploadCountryInput = document.getElementById('uploadCountryInput'); // 업로드 국가 (멀티 입력)
         const tagInclusionCheckbox = document.getElementById('tagInclusion');
         const excludeShortsCheckbox = document.getElementById('excludeShorts'); // 숏츠 제외
         const searchLanguageOnlyCheckbox = document.getElementById('searchLanguageOnly'); // 해당 언어만 검색
@@ -477,6 +469,7 @@
             '20': '게임',
             '22': '블로그/인물',
             '24': '엔터테인먼트',
+            '25': '뉴스 & 정치', // 뉴스 카테고리 추가
             '27': '교육',
             '28': '과학/기술',
         };
@@ -534,7 +527,6 @@
                 if (docSnap.exists()) {
                     const data = docSnap.data();
                     youtubeApiKey = data.key; // Load from Firestore if exists
-                    // messageBox.textContent = "✅ 저장된 API 키를 사용하여 앱을 로드했습니다."; // 경고 문구 삭제
                     console.log("API Key loaded successfully from Firestore.");
                 } else {
                     console.log("No stored API Key found. Using default hardcoded key.");
@@ -594,8 +586,8 @@
         }
 
         /**
-         * ISO 8601 Duration 문자열을 시계열 포맷 (HH:MM:SS)으로 변환합니다.
-         * 예: PT1H30M15S -> 1:30:15
+         * ISO 8601 Duration 문자열을 시계열 포맷 (00h 00m 00s)으로 변환합니다.
+         * 예: PT1H30M15S -> 1h 30m 15s
          */
         function formatDuration(iso8601) {
             if (!iso8601) return 'N/A';
@@ -606,13 +598,16 @@
             const minutes = parseInt(match[2]) || 0;
             const seconds = parseInt(match[3]) || 0;
 
-            const pad = (num) => String(num).padStart(2, '0');
+            let parts = [];
+            if (hours > 0) parts.push(`${hours}h`);
+            if (minutes > 0 || hours > 0) parts.push(`${minutes}m`); // 시간이 있으면 분도 항상 표시
+            parts.push(`${seconds}s`);
 
-            if (hours > 0) {
-                return `${hours}:${pad(minutes)}:${pad(seconds)}`;
-            } else {
-                return `${minutes}:${pad(seconds)}`;
-            }
+            // 시간이 0이고 분이 0일 경우, "0s" 대신 "0m 0s"와 같이 표시하도록 조정
+            if (hours === 0 && minutes === 0 && seconds === 0) return '0m 0s';
+            if (hours === 0 && minutes === 0) return `${seconds}s`;
+
+            return parts.join(' ');
         }
         
         /**
@@ -1118,9 +1113,9 @@
             const maxResults = maxResultsSelect.value;
             const videoDurationSelectValue = videoDurationSelect.value;
             const dateRange = dateRangeSelect.value;
-            const regionCode = regionCodeSelect.value;
             const minViews = parseInt(minViewsInput.value) || 0;
             const minSubscribers = parseInt(minSubscribersInput.value) || 0; // 최소 구독자 수
+            const uploadCountryCodes = uploadCountryInput.value.split(',').map(c => c.trim().toUpperCase()).filter(c => c.length === 2); // 멀티 국가 코드 파싱
             const isSearchLanguageOnly = searchLanguageOnlyCheckbox.checked;
 
             if (!keyword) {
@@ -1154,8 +1149,7 @@
                 const isShortsExcluded = excludeShortsCheckbox.checked;
                 let finalVideoDuration = videoDurationSelectValue;
 
-                // 숏츠 제외를 하지 않았고, 특정 영상 길이를 선택한 경우에만 API 파라미터 적용
-                // 여기서 duration 파라미터를 추가하면, API가 1차적으로 걸러주어 효율적입니다.
+                // 특정 영상 길이를 선택한 경우 API 파라미터 적용 (클라이언트 필터링과 함께 작동)
                 if (finalVideoDuration !== 'any') {
                     searchUrl += `&videoDuration=${finalVideoDuration}`;
                 }
@@ -1178,11 +1172,8 @@
                     searchUrl += `&relevanceLanguage=${langCode}`;
                 }
                 
-                // 지역 코드 (언어 검색과 무관하게 적용)
-                if (regionCode) {
-                    searchUrl += `&regionCode=${regionCode}`;
-                }
-
+                // YouTube Search API는 단일 regionCode만 허용하므로, 이 단계에서는 regionCode를 사용하지 않습니다.
+                // 모든 필터링은 클라이언트 측에서 처리됩니다.
 
                 const searchResponse = await fetch(searchUrl);
                 const searchData = await searchResponse.json();
@@ -1294,7 +1285,15 @@
                     // 2. 최소 구독자 수 필터링
                     if (video.subscriberCount < minSubscribers) return false;
 
-                    // 3. 숏츠 제외 (세로 영상) 클라이언트 필터링
+                    // 3. 업로드 국가 필터링 (멀티 국가)
+                    if (uploadCountryCodes.length > 0) {
+                        const videoCountry = video.channelCountry;
+                        if (videoCountry === 'N/A' || !uploadCountryCodes.includes(videoCountry)) {
+                            return false;
+                        }
+                    }
+
+                    // 4. 숏츠 제외 (세로 영상) 클라이언트 필터링
                     const durationSeconds = durationToSeconds(video.duration);
                     if (isShortsExcluded) {
                         // 썸네일 너비가 높이보다 작으면 (가로/세로 비율이 1보다 작으면) 세로 영상으로 간주
@@ -1303,7 +1302,7 @@
                         }
                     }
 
-                    // 4. 영상 길이 필터링 (Client-side enforcement, API 필터링 보강)
+                    // 5. 영상 길이 필터링 (Client-side enforcement)
                     if (videoDurationSelectValue !== 'any') {
                         if (videoDurationSelectValue === 'short' && durationSeconds >= 240) return false; // >= 4 min
                         if (videoDurationSelectValue === 'medium' && (durationSeconds < 240 || durationSeconds >= 1200)) return false; // < 4 min OR >= 20 min
@@ -1463,15 +1462,15 @@
                         <div class="flex-grow">
                             <!-- 제목 -->
                             <div class="flex items-center mb-1">
-                                <h3 id="title-${video.id}" class="video-title text-lg font-bold text-gray-900 line-clamp-2 mr-2" data-original-title="${video.title.replace(/"/g, '&quot;')}">
+                                <h3 id="title-${video.id}" class="video-title text-lg font-bold text-gray-900 line-clamp-2 mr-2" data-original-title="${video.title.replace(/"/g, '&quot')}">
                                     <a href="${videoLink}" target="_blank" rel="noopener noreferrer" class="hover:text-blue-600 transition duration-150">${video.title}</a>
                                 </h3>
                                 <!-- 번역 버튼 -->
-                                <button data-id="${video.id}" data-type="translate" data-title="${video.title.replace(/"/g, '&quot;')}" class="action-btn text-xs bg-gray-100 text-gray-600 hover:bg-blue-500 hover:text-white font-semibold py-1 px-2 rounded-full transition duration-150 active:scale-95 flex items-center">
+                                <button data-id="${video.id}" data-type="translate" data-title="${video.title.replace(/"/g, '&quot')}" class="action-btn text-xs bg-gray-100 text-gray-600 hover:bg-blue-500 hover:text-white font-semibold py-1 px-2 rounded-full transition duration-150 active:scale-95 flex items-center">
                                     <span class="action-text">번역</span>
                                 </button>
                                 <!-- 요약 버튼 -->
-                                <button data-id="${video.id}" data-type="summary" data-description="${video.description.replace(/"/g, '&quot;')}" class="action-btn text-xs bg-gray-100 text-gray-600 hover:bg-blue-500 hover:text-white font-semibold py-1 px-2 rounded-full ml-1 transition duration-150 active:scale-95 flex items-center">
+                                <button data-id="${video.id}" data-type="summary" data-description="${video.description.replace(/"/g, '&quot')}" class="action-btn text-xs bg-gray-100 text-gray-600 hover:bg-blue-500 hover:text-white font-semibold py-1 px-2 rounded-full ml-1 transition duration-150 active:scale-95 flex items-center">
                                     <span class="action-text">요약</span>
                                 </button>
                             </div>
