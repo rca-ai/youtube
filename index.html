@@ -128,7 +128,7 @@
             <h1 id="mainTitle" class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2 cursor-pointer hover:text-blue-600 transition duration-150" title="클릭하여 초기 화면으로 이동">
                 YouTube Trend 분석
             </h1>
-            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요.</p>
+            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요. (버전 1.1.0)</p>
         </header>
 
         <!-- 검색 및 필터 섹션 -->
@@ -354,6 +354,9 @@
 
     <!-- JavaScript 로직 (type="module"로 변경하여 Firebase Import 가능) -->
     <script type="module">
+        // Application Version
+        const APP_VERSION = '1.1.0';
+
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
@@ -638,19 +641,20 @@
 
             switch (range) {
                 case 'today':
-                    date.setHours(0, 0, 0, 0); // 오늘 0시
+                    // UTC 기준으로 오늘 00:00:00Z 설정
+                    date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0));
                     break;
                 case 'thisWeek':
-                    date.setDate(now.getDate() - now.getDay()); // 이번 주 일요일 (시작일)
-                    date.setHours(0, 0, 0, 0);
+                    // UTC 기준으로 이번 주 시작일 (일요일) 설정
+                    date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - now.getUTCDay(), 0, 0, 0));
                     break;
                 case 'thisMonth':
-                    date.setDate(1); // 이번 달 1일
-                    date.setHours(0, 0, 0, 0);
+                    // UTC 기준으로 이번 달 1일 설정
+                    date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0));
                     break;
                 case 'thisYear':
-                    date.setMonth(0, 1); // 이번 년도 1월 1일
-                    date.setHours(0, 0, 0, 0);
+                    // UTC 기준으로 이번 년도 1월 1일 설정
+                    date = new Date(Date.UTC(now.getUTCFullYear(), 0, 1, 0, 0, 0));
                     break;
                 default:
                     return undefined;
@@ -1112,13 +1116,13 @@
 
             const keyword = searchKeywordInput.value.trim();
             currentKeyword = keyword; // 현재 키워드 저장
-            const sortBy = sortBySelect.value;
+            let sortBy = sortBySelect.value; // **let으로 변경하여 조건부 변경 가능하게 함**
             const maxResults = maxResultsSelect.value;
             const videoDurationSelectValue = videoDurationSelect.value;
             const dateRange = dateRangeSelect.value;
             const minViews = parseInt(minViewsInput.value) || 0;
             const minSubscribers = parseInt(minSubscribersInput.value) || 0; // 최소 구독자 수
-            const uploadCountryCodes = uploadCountryInput.value.split(',').map(c => c.trim().toUpperCase()).filter(c => c.length === 2); // 멀티 국가 코드 파싱
+            const uploadCountryInputValues = uploadCountryInput.value.split(',').map(c => c.trim().toUpperCase()).filter(c => c.length === 2); // 멀티 국가 코드 파싱
             const isSearchLanguageOnly = searchLanguageOnlyCheckbox.checked;
 
             if (!keyword) {
@@ -1146,21 +1150,26 @@
 
 
                 // --- Step 1: Search API 호출 (영상 ID 목록 및 기본 메타데이터 가져오기) ---
+                
+                // **수정된 로직: 짧은 기간 검색 시 order=relevance 강제 적용**
+                if (dateRange === 'today' || dateRange === 'thisWeek') {
+                    sortBy = 'relevance'; // 검색 결과를 확보하기 위해 관련성순으로 강제 변경
+                }
+
                 let searchUrl = `https://www.googleapis.com/youtube/v3/search?part=snippet&q=${encodeURIComponent(keyword)}&type=video&maxResults=${maxResults}&order=${sortBy}&key=${youtubeApiKey}`;
                 
-                // 숏츠 제외 옵션 처리 (API level)
-                const isShortsExcluded = excludeShortsCheckbox.checked;
-                let finalVideoDuration = videoDurationSelectValue;
-
-                // 특정 영상 길이를 선택한 경우 API 파라미터 적용 (클라이언트 필터링과 함께 작동)
-                if (finalVideoDuration !== 'any') {
-                    searchUrl += `&videoDuration=${finalVideoDuration}`;
-                }
                 
                 const publishedAfter = calculatePublishedAfter(dateRange);
                 if (publishedAfter) {
                     searchUrl += `&publishedAfter=${publishedAfter}`;
                 }
+
+                // 숏츠 제외 옵션 처리 (API level) - 숏츠 제외 옵션이 켜져있더라도, 영상 길이 드롭다운이 any가 아니면 API 파라미터 적용
+                // 그러나, '숏츠 제외'는 세로 영상 기준으로 클라이언트 측에서 필터링하므로, API 제약을 최소화하기 위해 videoDuration 파라미터는 영상 길이 드롭다운에만 의존합니다.
+                if (videoDurationSelectValue !== 'any') {
+                    searchUrl += `&videoDuration=${videoDurationSelectValue}`;
+                }
+                
                 
                 // '해당 언어만 검색' 옵션 처리
                 if (isSearchLanguageOnly) {
@@ -1280,45 +1289,71 @@
                     };
                 });
                 
+                // 필터링 이유 설명을 위한 변수
+                let filterReasons = [];
+                
                 // 클라이언트 필터링 적용
                 let filteredResults = finalResults.filter(video => {
-                    // 1. 최소 조회수 필터링
-                    if (video.viewCount < minViews) return false;
+                    let passed = true;
                     
-                    // 2. 최소 구독자 수 필터링
-                    if (video.subscriberCount < minSubscribers) return false;
+                    // 1. 최소 조회수 필터링
+                    if (minViews > 0 && video.viewCount < minViews) {
+                        passed = false;
+                        filterReasons.push(`(최소 조회수: ${formatNumber(minViews)} 미만)`);
+                    }
 
-                    // 3. 업로드 국가 필터링 (멀티 국가) - 공백일 경우 전체 대상 검색 (수정 로직 반영)
-                    if (uploadCountryCodes.length > 0) { 
+                    // 2. 최소 구독자 수 필터링
+                    if (passed && minSubscribers > 0 && video.subscriberCount < minSubscribers) {
+                        passed = false;
+                        filterReasons.push(`(최소 구독자: ${formatNumber(minSubscribers)} 미만)`);
+                    }
+
+                    // 3. 업로드 국가 필터링 (멀티 국가)
+                    if (passed && uploadCountryInputValues.length > 0) { 
                         const videoCountry = video.channelCountry;
-                        if (videoCountry === 'N/A' || !uploadCountryCodes.includes(videoCountry)) {
-                            return false;
+                        if (videoCountry === 'N/A' || !uploadCountryInputValues.includes(videoCountry)) {
+                            passed = false;
+                            filterReasons.push(`(업로드 국가: ${videoCountry}가 지정 국가에 없음)`);
                         }
                     }
 
                     // 4. 숏츠 제외 (세로 영상) 클라이언트 필터링
                     const durationSeconds = durationToSeconds(video.duration);
-                    if (isShortsExcluded) {
-                        // 썸네일 너비가 높이보다 작으면 (가로/세로 비율이 1보다 작으면) 세로 영상으로 간주
-                        if (video.thumbnailWidth && video.thumbnailHeight && video.thumbnailWidth < video.thumbnailHeight) {
-                            return false; // 숏츠(세로 영상) 제외
+                    const isVertical = video.thumbnailWidth && video.thumbnailHeight && video.thumbnailWidth < video.thumbnailHeight;
+
+                    if (passed && excludeShortsCheckbox.checked) {
+                        if (isVertical) {
+                            passed = false; // 숏츠(세로 영상) 제외
+                            filterReasons.push(`(숏츠 제외 옵션에 의해 세로 영상 제외됨)`);
                         }
                     }
 
                     // 5. 영상 길이 필터링 (Client-side enforcement)
-                    if (videoDurationSelectValue !== 'any') {
-                        if (videoDurationSelectValue === 'short' && durationSeconds >= 240) return false; // >= 4 min
-                        if (videoDurationSelectValue === 'medium' && (durationSeconds < 240 || durationSeconds >= 1200)) return false; // < 4 min OR >= 20 min
-                        if (videoDurationSelectValue === 'long' && durationSeconds < 1200) return false; // < 20 min
+                    if (passed && videoDurationSelectValue !== 'any') {
+                        let excluded = false;
+                        if (videoDurationSelectValue === 'short' && durationSeconds >= 240) excluded = true; // >= 4 min
+                        if (videoDurationSelectValue === 'medium' && (durationSeconds < 240 || durationSeconds >= 1200)) excluded = true; // < 4 min OR >= 20 min
+                        if (videoDurationSelectValue === 'long' && durationSeconds < 1200) excluded = true; // < 20 min
+                        
+                        if (excluded) {
+                            passed = false;
+                            filterReasons.push(`(영상 길이: ${videoDurationSelect.options[videoDurationSelect.selectedIndex].text} 기준 불충족)`);
+                        }
                     }
 
-                    return true;
+                    return passed;
                 });
                 
                 filteredCount = filteredResults.length;
 
                 if (filteredCount === 0 && initialResultCount > 0) {
-                     messageBox.textContent = `⚠️ 검색된 영상 ${initialResultCount}개가 있었으나, 설정된 필터 조건(최소 조회수: ${formatNumber(minViews)}회, 최소 구독자: ${formatNumber(minSubscribers)}명, 숏츠 제외: ${isShortsExcluded ? '활성' : '비활성'})으로 인해 모두 제외되었습니다. 필터를 조정해 주세요.`;
+                    // 결과가 0개일 경우 필터링 상세 이유를 분석하여 메시지 출력
+                    const uniqueReasons = [...new Set(filterReasons)];
+                    const reasonString = uniqueReasons.length > 0 
+                        ? uniqueReasons.slice(0, 3).join(', ') + (uniqueReasons.length > 3 ? ' 등...' : '')
+                        : '알 수 없는 이유';
+
+                    messageBox.textContent = `⚠️ 검색된 영상 ${initialResultCount}개가 있었으나, 설정된 필터 조건(${reasonString})으로 인해 모두 제외되었습니다. 필터를 조정해 주세요.`;
                 }
 
                 // --- Step 5: 결과 렌더링 ---
