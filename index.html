@@ -128,7 +128,7 @@
             <h1 id="mainTitle" class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2 cursor-pointer hover:text-blue-600 transition duration-150" title="클릭하여 초기 화면으로 이동">
                 YouTube Trend 분석
             </h1>
-            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요. (버전 1.1.0)</p>
+            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요. (버전 1.1.1)</p>
         </header>
 
         <!-- 검색 및 필터 섹션 -->
@@ -232,6 +232,10 @@
                     <label class="inline-flex items-center">
                         <input type="checkbox" id="excludeShorts" checked class="form-checkbox h-4 w-4 text-red-600 rounded">
                         <span class="ml-2 text-gray-700 font-medium">숏츠 제외 (세로 영상)</span>
+                    </label>
+                    <label class="inline-flex items-center">
+                        <input type="checkbox" id="excludeKR" class="form-checkbox h-4 w-4 text-red-600 rounded">
+                        <span class="ml-2 text-gray-700 font-medium">KR 제외</span>
                     </label>
                     <label class="inline-flex items-center">
                         <input type="checkbox" id="searchLanguageOnly" class="form-checkbox h-4 w-4 text-green-600 rounded">
@@ -355,7 +359,7 @@
     <!-- JavaScript 로직 (type="module"로 변경하여 Firebase Import 가능) -->
     <script type="module">
         // Application Version
-        const APP_VERSION = '1.1.0';
+        const APP_VERSION = '1.1.1';
 
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -423,6 +427,7 @@
         const uploadCountryInput = document.getElementById('uploadCountryInput'); // 업로드 국가 (멀티 입력)
         const tagInclusionCheckbox = document.getElementById('tagInclusion');
         const excludeShortsCheckbox = document.getElementById('excludeShorts'); // 숏츠 제외
+        const excludeKRCheckbox = document.getElementById('excludeKR'); // KR 제외 옵션 추가
         const searchLanguageOnlyCheckbox = document.getElementById('searchLanguageOnly'); // 해당 언어만 검색
         
         // 새로운 요소 캐시 (검색량 분석 관련)
@@ -591,6 +596,7 @@
         /**
          * ISO 8601 Duration 문자열을 시계열 포맷 (00h 00m 00s)으로 변환합니다.
          * 예: PT1H30M15S -> 1h 30m 15s
+         * 수정: 분 단위가 누락되었을 때 초로 잘못 처리되던 문제를 수정했습니다.
          */
         function formatDuration(iso8601) {
             if (!iso8601) return 'N/A';
@@ -603,15 +609,15 @@
 
             let parts = [];
             if (hours > 0) parts.push(`${hours}h`);
-            if (minutes > 0 || hours > 0) parts.push(`${minutes}m`); // 시간이 있으면 분도 항상 표시
-            parts.push(`${seconds}s`);
+            // 시간이 0이더라도 분이 0이 아니면 표시, 또는 시간이 있으면 분도 표시
+            if (minutes > 0 || hours > 0) parts.push(`${minutes}m`); 
+            // 시간이 0, 분이 0이더라도 초가 0이 아니면 표시
+            if (seconds > 0 || (hours === 0 && minutes === 0)) parts.push(`${seconds}s`);
 
-            // 시간이 0이고 분이 0일 경우, "0m 0s"와 같이 표시하도록 조정
-            if (hours === 0 && minutes === 0 && seconds === 0) return '0m 0s';
-            // 시간이 0이고 분이 0이 아닐 경우 (예: 15s)
-            if (hours === 0 && minutes === 0) return `${seconds}s`;
-            // 시간이 0이고 분이 있을 경우 (예: 5m 15s)
-            if (hours === 0) return parts.slice(1).join(' ');
+            // 전체가 0일 경우
+            if (hours === 0 && minutes === 0 && seconds === 0) return '0s';
+            
+            // 마지막에 남은 불필요한 0s를 제거 (이미 위에서 처리됨)
 
             return parts.join(' ');
         }
@@ -1123,6 +1129,7 @@
             const minViews = parseInt(minViewsInput.value) || 0;
             const minSubscribers = parseInt(minSubscribersInput.value) || 0; // 최소 구독자 수
             const uploadCountryInputValues = uploadCountryInput.value.split(',').map(c => c.trim().toUpperCase()).filter(c => c.length === 2); // 멀티 국가 코드 파싱
+            const excludeKR = excludeKRCheckbox.checked; // KR 제외 옵션 상태
             const isSearchLanguageOnly = searchLanguageOnlyCheckbox.checked;
 
             if (!keyword) {
@@ -1308,7 +1315,7 @@
                         filterReasons.push(`(최소 구독자: ${formatNumber(minSubscribers)} 미만)`);
                     }
 
-                    // 3. 업로드 국가 필터링 (멀티 국가)
+                    // 3. 업로드 국가 필터링 (멀티 국가) - KR 제외 필터보다 먼저 실행
                     if (passed && uploadCountryInputValues.length > 0) { 
                         const videoCountry = video.channelCountry;
                         if (videoCountry === 'N/A' || !uploadCountryInputValues.includes(videoCountry)) {
@@ -1316,8 +1323,16 @@
                             filterReasons.push(`(업로드 국가: ${videoCountry}가 지정 국가에 없음)`);
                         }
                     }
+                    
+                    // 4. KR 제외 필터링 (새로 추가)
+                    if (passed && excludeKR) {
+                        if (video.channelCountry === 'KR') {
+                            passed = false;
+                            filterReasons.push(`(KR 제외 옵션에 의해 한국 영상 제외됨)`);
+                        }
+                    }
 
-                    // 4. 숏츠 제외 (세로 영상) 클라이언트 필터링
+                    // 5. 숏츠 제외 (세로 영상) 클라이언트 필터링
                     const durationSeconds = durationToSeconds(video.duration);
                     const isVertical = video.thumbnailWidth && video.thumbnailHeight && video.thumbnailWidth < video.thumbnailHeight;
 
@@ -1328,7 +1343,7 @@
                         }
                     }
 
-                    // 5. 영상 길이 필터링 (Client-side enforcement)
+                    // 6. 영상 길이 필터링 (Client-side enforcement)
                     if (passed && videoDurationSelectValue !== 'any') {
                         let excluded = false;
                         if (videoDurationSelectValue === 'short' && durationSeconds >= 240) excluded = true; // >= 4 min
