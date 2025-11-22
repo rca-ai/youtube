@@ -1,0 +1,78 @@
+<?php
+date_default_timezone_set("GMT+0");
+
+// 함수를 통해 API 데이터를 얻어오거나 캐시된 데이터를 반환합니다.
+function getCachedCoupangProducts() {
+    $cacheFile = 'coupang_cache.json';
+
+    // 캐시가 있는지 확인
+    if (file_exists($cacheFile) && filemtime($cacheFile) > strtotime('-1 day')) {
+        // 캐시가 있고 1일 이내에 업데이트된 경우 캐시 데이터 반환
+        $cachedData = file_get_contents($cacheFile);
+        return json_decode($cachedData, true);
+    } else {
+        // API 호출 및 데이터 가져오기
+        $apiData = getCoupangProductsFromAPI();
+
+        // 캐시 파일 저장
+        file_put_contents($cacheFile, json_encode($apiData));
+
+        return $apiData;
+    }
+}
+
+// 실제로 API를 호출하여 데이터를 가져오는 함수
+function getCoupangProductsFromAPI() {
+    $datetime = gmdate("ymd\THis\Z");
+    $method = "GET";
+    $path = "/v2/providers/affiliate_open_api/apis/openapi/products/bestcategories/1001?limit=50"; // 여성패션 카테고리 예시
+
+    $ACCESS_KEY = "bb4be685-ae1e-4a36-aef7-28b4e582122d";
+    $SECRET_KEY = "abaae45944aad2e7a4b5d0bd3c872a8dd8c72145";
+
+    $message = $datetime . $method . str_replace("?", "", $path);
+    $algorithm = "HmacSHA256";
+    $signature = hash_hmac('sha256', $message, $SECRET_KEY);
+    $authorization = "CEA algorithm=HmacSHA256, access-key=" . $ACCESS_KEY . ", signed-date=" . $datetime . ", signature=" . $signature;
+
+    $url = 'https://api-gateway.coupang.com' . $path;
+
+    $curl = curl_init();
+    curl_setopt($curl, CURLOPT_URL, $url);
+    curl_setopt($curl, CURLOPT_CUSTOMREQUEST, $method);
+    curl_setopt($curl, CURLOPT_HTTPHEADER, array("Content-Type: application/json;charset=UTF-8", "Authorization:" . $authorization));
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, 1);
+    $result = curl_exec($curl);
+    $httpcode = curl_getinfo($curl, CURLINFO_HTTP_CODE);
+
+    curl_close($curl);
+
+    // API 응답 확인
+    if ($httpcode == 200) {
+        $resultArray = json_decode($result, true);
+        return $resultArray['data'];
+    } else {
+        return [];
+    }
+}
+
+// 캐시를 통해 데이터 가져오기
+$products = getCachedCoupangProducts();
+
+// 상품 목록 출력
+echo '<h2>쿠팡 상품 목록</h2>';
+echo '<ul>';
+foreach ($products as $product) {
+    // 커미션을 받기 위한 subId 추가
+    $affiliateLink = $product['productUrl'] . '&subId=your_sub_id';
+
+    echo '<li>';
+    echo '<a href="' . $affiliateLink . '" target="_blank">';
+    echo '<img src="' . $product['productImage'] . '" alt="상품 이미지"><br>';
+    echo '상품명: ' . $product['productName'] . '<br>';
+    echo '가격: ' . number_format($product['productPrice']) . '원<br>';
+    echo '</a>';
+    echo '</li>';
+}
+echo '</ul>';
+?>
