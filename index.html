@@ -407,9 +407,9 @@
         let auth;
         let userId = 'anonymous'; 
         
-        // NOTE: The user has requested to hardcode this key for testing purposes to bypass immediate API key input errors.
-        const DEFAULT_YOUTUBE_API_KEY = 'AIzaSyDe0emcV4KC675d04fgKn1bmFPdXldpdxE';
-        let youtubeApiKey = DEFAULT_YOUTUBE_API_KEY; // Pre-fill with the user-provided key
+        // NOTE: 기본 키를 빈 문자열로 변경하여 사용자가 새 키를 입력하도록 유도합니다.
+        const DEFAULT_YOUTUBE_API_KEY = ''; 
+        let youtubeApiKey = DEFAULT_YOUTUBE_API_KEY; 
         
         // Pagination state
         let nextPageToken = null;
@@ -559,9 +559,13 @@
                     console.log("API Key loaded successfully from Firestore.");
                 } else {
                     console.log("No stored API Key found. Using default hardcoded key.");
+                    // 키가 없으면 키 입력 모달을 표시 (새 키를 입력하도록 유도)
+                    showApiKeyModal(true); 
                 }
             } catch (e) {
                 console.error("Error loading API key from Firestore:", e);
+                // 키 로드 실패 시에도 키 입력 모달 표시
+                showApiKeyModal(true); 
             }
         }
 
@@ -579,7 +583,7 @@
                 youtubeApiKey = key;
                 apiKeyModal.classList.add('hidden');
                 modalMessage.classList.add('hidden');
-                messageBox.textContent = "✅ API 키가 성공적으로 저장되었습니다.";
+                messageBox.textContent = "✅ API 키가 성공적으로 저장되었습니다. 이제 검색을 시작할 수 있습니다.";
                 console.log("API Key saved successfully to Firestore.");
             } catch (e) {
                 console.error("Error saving API key:", e);
@@ -616,7 +620,6 @@
 
         /**
          * ISO 8601 Duration 문자열을 시계열 포맷 (00h 00m 00s)으로 변환합니다.
-         * 수정: 분 단위가 누락되었을 때 초로 잘못 처리되던 문제를 수정했습니다. (버전 1.1.2)
          */
         function formatDuration(iso8601) {
             if (!iso8601) return 'N/A';
@@ -629,17 +632,12 @@
 
             let parts = [];
             if (hours > 0) parts.push(`${hours}h`);
-            // 시간이 0이더라도 분이 0이 아니면 표시, 또는 시간이 있으면 분도 표시
             if (minutes > 0 || hours > 0) parts.push(`${minutes}m`); 
-            // 초는 항상 표시 (예: 0m 15s)
             parts.push(`${seconds}s`);
 
-            // 시간이 0이고 분이 0일 경우 (예: 15s)
-            if (hours === 0 && minutes === 0) return `${seconds}s`;
-            
-            // 전체가 0일 경우
             if (hours === 0 && minutes === 0 && seconds === 0) return '0s';
-
+            if (hours === 0 && minutes === 0) return `${seconds}s`; // 15s
+            
             return parts.join(' ');
         }
         
@@ -726,7 +724,10 @@
          * @returns {Promise<string>} 생성된 텍스트
          */
         async function callGeminiApi(prompt, systemInstruction) {
+            // 키 유효성 검사 강화
             if (!youtubeApiKey || youtubeApiKey.length < 20) {
+                 // API 키가 유효하지 않으면 모달을 표시하고 오류 반환
+                 showApiKeyModal(true); 
                  return "[API 오류: Gemini API 키가 설정되지 않았습니다. 키를 입력하고 저장해 주세요.]";
             }
             
@@ -752,9 +753,9 @@
                         const errorMessage = errorData.error?.message || `API call failed with status: ${response.status}`;
                         lastErrorMessage = errorMessage;
                         
-                        // Check for transient errors (Overloaded, Too Many Requests, Server Error, Quota Exceeded)
+                        // Check for transient errors (Overloaded, Too Many Requests, Server Error, Quota Exceeded, Leaked Key)
                         if (response.status === 429 || 
-                            response.status >= 500 || // 5xx server errors often temporary
+                            response.status >= 500 || 
                             errorMessage.includes("overloaded") || 
                             errorMessage.includes("rate limit") ||
                             errorMessage.includes("Quota exceeded")) {
@@ -770,8 +771,11 @@
                                 // Max retries reached
                                 throw new Error(errorMessage); 
                             }
+                        } else if (errorMessage.includes("leaked")) {
+                            // Leaked key error: critical, no retry
+                            throw new Error(errorMessage);
                         } else {
-                            // Non-transient error (e.g., 400 Bad Request, 403 Forbidden - requires user action)
+                            // Non-transient error
                             throw new Error(errorMessage);
                         }
                     }
@@ -782,15 +786,12 @@
                     return text.trim();
 
                 } catch (error) {
-                    // Catch network errors or specific errors thrown above
                     if (attempt < MAX_RETRIES - 1 && (error.message.includes("Failed to fetch") || error.message.includes("overloaded"))) {
-                        // For network errors or if we missed an overload error, retry (though status check is better)
                         const delay = Math.pow(2, attempt) * 1000 + (Math.random() * 1000); 
                         console.warn(`Network/Transient API error (Attempt ${attempt + 1}/${MAX_RETRIES}). Retrying in ${Math.round(delay/1000)}s...`);
                         await new Promise(resolve => setTimeout(resolve, delay));
                         continue;
                     } else {
-                        // Re-throw if max retries reached or it's a critical error
                         lastErrorMessage = lastErrorMessage || error.message;
                         break; // Exit loop to handle final error
                     }
@@ -847,6 +848,12 @@
             return Math.max(100, Math.round(volume));
         }
         
+        // 시간대 매핑 (트렌드 날짜 인식 정확도 향상을 위해 사용)
+        const TIMEZONE_MAP = {
+            'KR': 'Asia/Seoul', 'US': 'America/New_York', 'JP': 'Asia/Tokyo', 'GB': 'Europe/London', 
+            'DE': 'Europe/Berlin', 'CN': 'Asia/Shanghai', 'VN': 'Asia/Ho_Chi_Minh', 'TH': 'Asia/Bangkok', '': 'UTC'
+        };
+
         /**
          * 선택된 기간과 국가, 카테고리를 기반으로 Gemini API를 호출하여 트렌드 키워드를 생성합니다.
          */
@@ -854,14 +861,17 @@
             const regionName = REGION_NAMES[regionCode] || 'Global';
             const rangeName = TIME_RANGE_NAMES[timeRange] || 'All Time';
             const categoryName = CATEGORY_MAP[categoryCode] || 'General Topics';
-            const currentDateTime = new Date().toLocaleString('en-US', { timeZone: 'UTC' }); // UTC 시간 정보 추가
+            
+            // 사용자의 요청에 따라, 선택된 국가의 현지 시간을 프롬프트에 명시적으로 전달
+            const timezone = TIMEZONE_MAP[regionCode] || 'UTC';
+            const currentDateTime = new Date().toLocaleString('en-US', { timeZone: timezone });
             
             const keywordContext = searchKeyword ? `related to the topic of "${searchKeyword}"` : 'general popular topics';
 
             const systemPrompt = "You are a YouTube trend prediction expert. Based on the given region, time, and category, generate a list of 20 realistic and currently trending YouTube search keywords. The output must be only a comma-separated list of keywords, with no prefix, suffix, or explanation.";
             
-            // 현재 날짜/시간 정보를 프롬프트에 추가하여 동적인 결과를 유도합니다.
-            const userPrompt = `Generate 20 currently trending YouTube keywords for the region: "${regionName}", time range: "${rangeName}", and category: "${categoryName}", focusing on ${keywordContext}. Current UTC Time: ${currentDateTime}`;
+            // 현지 시간 정보를 프롬프트에 추가
+            const userPrompt = `Generate 20 currently trending YouTube keywords for the region: "${regionName}", time range: "${rangeName}", and category: "${categoryName}", focusing on ${keywordContext}. The local time for this region is currently: ${currentDateTime} (${timezone}).`;
 
             try {
                 // 로딩 시작
@@ -1744,7 +1754,7 @@
                     } else {
                         lastError = translatedTitle;
                         console.error(`Translation failed for: ${originalTitle}. Error: ${translatedTitle}`);
-                        if (translatedTitle.includes('Quota exceeded')) {
+                        if (translatedTitle.includes('Quota exceeded') || translatedTitle.includes('leaked')) {
                             break; 
                         }
                     }
@@ -1761,7 +1771,7 @@
             } else if (successfulTranslations > 0) {
                  messageBox.textContent = `⚠️ ${successfulTranslations}개 제목을 번역했습니다. 나머지 (${titleElements.length - successfulTranslations}개)는 오류 또는 할당량 초과로 인해 중단되었습니다. 잠시 후 다시 시도해 주세요.`;
             } else {
-                 messageBox.textContent = `❌ 제목 번역에 실패했습니다. ${lastError || '알 수 없는 오류'}. API 할당량을 확인해 주세요.`;
+                 messageBox.textContent = `❌ 제목 번역에 실패했습니다. ${lastError || '알 수 없는 오류'}. API 할당량을 확인하거나 새 키를 발급받으세요.`;
             }
 
             // Restore button state
