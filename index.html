@@ -130,7 +130,7 @@
             <h1 id="mainTitle" class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2 cursor-pointer hover:text-blue-600 transition duration-150" title="클릭하여 초기 화면으로 이동">
                 YouTube Trend 분석
             </h1>
-            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요. (버전 1.1.5)</p>
+            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요. (버전 1.1.7)</p>
         </header>
 
         <!-- 검색 및 필터 섹션 -->
@@ -371,7 +371,7 @@
     <!-- JavaScript 로직 (type="module"로 변경하여 Firebase Import 가능) -->
     <script type="module">
         // Application Version
-        const APP_VERSION = '1.1.6'; // 버전 업데이트
+        const APP_VERSION = '1.1.7'; // 버전 업데이트
 
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -590,35 +590,28 @@
                  return;
             }
 
+            // **CRITICAL FIX: 키 유효성 통과 시 즉시 전역 변수 설정 및 모달 닫기**
+            youtubeApiKey = key; 
+            apiKeyModal.classList.add('hidden'); // 모달 즉시 닫기
+            modalMessage.classList.add('hidden');
+            
             const keyDocRef = doc(db, `artifacts/${appId}/users/${userId}/settings/youtube_api_key`);
-            let saveSuccessful = false;
             
             try {
-                // 1. Firestore에 키 저장 시도
+                // 1. Firestore에 키 저장 시도 (비동기 처리)
                 await setDoc(keyDocRef, { key: key, savedAt: new Date().toISOString() });
-                saveSuccessful = true;
-                youtubeApiKey = key;
                 
                 // 2. 저장 성공 시
-                apiKeyModal.classList.add('hidden');
-                modalMessage.classList.add('hidden');
                 messageBox.textContent = "✅ API 키가 성공적으로 저장되었습니다. 이제 검색을 시작할 수 있습니다.";
                 console.log("API Key saved successfully to Firestore.");
                 
             } catch (e) {
-                // 3. 저장 실패 시 (대부분 permission-denied)
-                youtubeApiKey = key; // 전역 변수에는 키를 설정하여 검색은 가능하게 합니다.
+                // 3. 저장 실패 시 (permission-denied 등)
+                let errorMessage = `🚨 Firebase 저장소 오류로 키 저장은 실패했지만, **키는 현재 세션에 임시 설정**되었습니다. 검색을 시도해 보세요.`;
                 
-                let errorMessage = `키 저장 중 오류 발생: ${e.message}. (키는 로컬에 임시 설정되었습니다)`;
-                if (e.code === 'permission-denied') {
-                    errorMessage = `🚨 Firebase 권한 오류로 키 저장은 실패했지만, **키는 현재 세션에 임시 설정**되었습니다. 검색을 시도해 보세요.`;
-                }
-
                 console.error("Error saving API key:", e);
                 
-                // 모달 닫기 및 메시지 표시 (키 저장은 실패했으나 사용은 가능함)
-                apiKeyModal.classList.add('hidden');
-                modalMessage.classList.add('hidden');
+                // 모달은 이미 닫혔으므로, 메시지 박스만 업데이트
                 messageBox.textContent = errorMessage;
             }
         }
