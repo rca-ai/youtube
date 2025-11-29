@@ -104,7 +104,7 @@
             <p class="text-gray-600 mb-4 text-sm">
                 영상을 검색하려면 YouTube Data API v3 키가 필요합니다. 이 키는 Firestore에 안전하게 저장됩니다.
                 <br>
-                <strong class="text-red-500">Firebase 오류가 계속 발생한다면, 유효한 YouTube API 키를 입력하고 저장해 주세요.</strong>
+                <strong class="text-red-500">Firebase에 저장되지 않더라도, 키를 입력하고 저장 버튼을 누르면 검색을 시작할 수 있습니다.</strong>
             </p>
             <input
                 type="text"
@@ -371,7 +371,7 @@
     <!-- JavaScript 로직 (type="module"로 변경하여 Firebase Import 가능) -->
     <script type="module">
         // Application Version
-        const APP_VERSION = '1.1.5'; // 버전 업데이트
+        const APP_VERSION = '1.1.6'; // 버전 업데이트
 
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -564,6 +564,12 @@
                     showApiKeyModal(true); 
                 }
             } catch (e) {
+                // Firestore 권한 오류가 발생할 경우 (가장 흔한 에러)
+                if (e.code === 'permission-denied') {
+                     messageBox.textContent = `🚨 Firebase 저장소 권한 오류가 발생했습니다. 키를 입력하고 '키 저장 및 사용' 버튼을 누르면, **임시 키**로 앱을 사용할 수 있습니다.`;
+                } else {
+                     messageBox.textContent = `🚨 Firebase 로드 중 오류: ${e.message}. 키를 입력해 주세요.`;
+                }
                 console.error("Error loading API key from Firestore:", e);
                 // 키 로드 실패 시에도 키 입력 모달 표시
                 showApiKeyModal(true); 
@@ -576,22 +582,44 @@
                 modalMessage.classList.remove('hidden');
                 return;
             }
+            
+            // 유효성 검사 통과 (20자 이상)
+            if (key.length < 20) {
+                 modalMessage.textContent = "유효한 API 키를 입력해 주세요.";
+                 modalMessage.classList.remove('hidden');
+                 return;
+            }
 
             const keyDocRef = doc(db, `artifacts/${appId}/users/${userId}/settings/youtube_api_key`);
+            let saveSuccessful = false;
             
             try {
+                // 1. Firestore에 키 저장 시도
                 await setDoc(keyDocRef, { key: key, savedAt: new Date().toISOString() });
+                saveSuccessful = true;
                 youtubeApiKey = key;
-                // --- 키 저장 성공 시 모달 확실히 닫기 및 메시지 표시 ---
+                
+                // 2. 저장 성공 시
                 apiKeyModal.classList.add('hidden');
                 modalMessage.classList.add('hidden');
                 messageBox.textContent = "✅ API 키가 성공적으로 저장되었습니다. 이제 검색을 시작할 수 있습니다.";
-                // -------------------------------------------------------------
                 console.log("API Key saved successfully to Firestore.");
+                
             } catch (e) {
+                // 3. 저장 실패 시 (대부분 permission-denied)
+                youtubeApiKey = key; // 전역 변수에는 키를 설정하여 검색은 가능하게 합니다.
+                
+                let errorMessage = `키 저장 중 오류 발생: ${e.message}. (키는 로컬에 임시 설정되었습니다)`;
+                if (e.code === 'permission-denied') {
+                    errorMessage = `🚨 Firebase 권한 오류로 키 저장은 실패했지만, **키는 현재 세션에 임시 설정**되었습니다. 검색을 시도해 보세요.`;
+                }
+
                 console.error("Error saving API key:", e);
-                modalMessage.textContent = `키 저장 중 오류 발생: ${e.message}. Firebase 설정이 올바른지 확인하거나, 유효한 YouTube API 키인지 확인해 주세요.`;
-                modalMessage.classList.remove('hidden');
+                
+                // 모달 닫기 및 메시지 표시 (키 저장은 실패했으나 사용은 가능함)
+                apiKeyModal.classList.add('hidden');
+                modalMessage.classList.add('hidden');
+                messageBox.textContent = errorMessage;
             }
         }
         
