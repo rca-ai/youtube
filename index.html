@@ -128,7 +128,7 @@
             <h1 id="mainTitle" class="text-3xl sm:text-4xl font-extrabold text-gray-900 mb-2 cursor-pointer hover:text-blue-600 transition duration-150" title="클릭하여 초기 화면으로 이동">
                 YouTube Trend 분석
             </h1>
-            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요. (버전 1.1.2)</p>
+            <p class="text-gray-500">키워드 및 고급 필터를 사용하여 YouTube 영상을 검색하고 상세 통계를 분석하세요. (버전 1.1.3)</p>
         </header>
 
         <!-- 검색 및 필터 섹션 -->
@@ -369,7 +369,7 @@
     <!-- JavaScript 로직 (type="module"로 변경하여 Firebase Import 가능) -->
     <script type="module">
         // Application Version
-        const APP_VERSION = '1.1.2';
+        const APP_VERSION = '1.1.3'; // 버전 업데이트
 
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -581,9 +581,11 @@
             try {
                 await setDoc(keyDocRef, { key: key, savedAt: new Date().toISOString() });
                 youtubeApiKey = key;
+                // --- 수정된 부분: 키 저장 성공 시 모달 확실히 닫기 및 메시지 표시 ---
                 apiKeyModal.classList.add('hidden');
                 modalMessage.classList.add('hidden');
                 messageBox.textContent = "✅ API 키가 성공적으로 저장되었습니다. 이제 검색을 시작할 수 있습니다.";
+                // -------------------------------------------------------------
                 console.log("API Key saved successfully to Firestore.");
             } catch (e) {
                 console.error("Error saving API key:", e);
@@ -801,6 +803,12 @@
             // Final error handling after retry loop
             console.error("Gemini API Error (Final):", lastErrorMessage);
             let cleanMessage = lastErrorMessage.replace(/^Error:\s*/, '');
+            
+            // API 키 누출 오류 메시지 처리
+            if (cleanMessage.includes("leaked")) {
+                 cleanMessage = 'Your API key was reported as leaked. Please use another API key.';
+            }
+
             return `[API 오류: ${cleanMessage}]`;
         }
 
@@ -864,7 +872,8 @@
             
             // 사용자의 요청에 따라, 선택된 국가의 현지 시간을 프롬프트에 명시적으로 전달
             const timezone = TIMEZONE_MAP[regionCode] || 'UTC';
-            const currentDateTime = new Date().toLocaleString('en-US', { timeZone: timezone });
+            // 현지 시간을 명시하여 Gemini가 시간적 맥락을 파악하도록 돕습니다.
+            const currentDateTime = new Date().toLocaleString('en-US', { timeZone: timezone, year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
             
             const keywordContext = searchKeyword ? `related to the topic of "${searchKeyword}"` : 'general popular topics';
 
